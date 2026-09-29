@@ -31,6 +31,8 @@ from dpd.models.structure import (
 from dpd.models.template import (
     Layout,
     LayoutFamily,
+    MarkupQuality,
+    ParsingStrategy,
     Slot,
     SlotKind,
     SlotOrigin,
@@ -53,6 +55,8 @@ __all__ = [
     "FontToken",
     "Layout",
     "LayoutFamily",
+    "MarkupQuality",
+    "ParsingStrategy",
     "PresentationStructure",
     "RenderedElement",
     "RenderedPresentation",

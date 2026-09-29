@@ -28,6 +28,7 @@ from dpd.models import (
 )
 from dpd.parsing.families import classified
 from dpd.parsing.inheritance import StyleResolver
+from dpd.parsing.quality import measure
 from dpd.parsing.slots import (
     derived_slot,
     inherit_colour_from_title,
@@ -62,6 +63,7 @@ def parse_template(path: str | Path) -> TemplateSchema:
     ]
 
     return TemplateSchema(
+        markup_quality=measure(presentation),
         design_tokens=extract_design_tokens(presentation),
         source=TemplateSource(
             file=path.name,

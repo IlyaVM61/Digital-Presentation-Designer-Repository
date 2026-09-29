@@ -19,6 +19,33 @@ from dpd.models.tokens import DesignTokens
 
 SlotKind = Literal["title", "body", "other"]
 
+ParsingStrategy = Literal["placeholder-first", "geometry-first", "examples-first"]
+"""На что опирается разбор шаблона.
+
+`placeholder-first` — макеты размечены плейсхолдерами и им можно верить;
+`examples-first` — примеры ровно покрывают макеты и служат лучшим сигналом;
+`geometry-first` — ни того, ни другого нет, тип и слоты выводятся из
+геометрии. Последняя работает всегда, просто даёт меньше уверенности."""
+
+
+class MarkupQuality(Contract):
+    """Измерение того, на что в этом файле можно опереться.
+
+    `score` — не для выбора стратегии, а для отчёта пользователю: по нему
+    видно, насколько шаблон пригоден как набор правил.
+    """
+
+    layouts_total: int = 0
+    layouts_with_multiple_slots: int = 0
+    layouts_with_unique_name: int = 0
+    layouts_with_examples: int = 0
+    example_concentration: float = 0.0
+    has_picture_placeholders: bool = False
+    masters_empty: bool = False
+    score: float = 0.0
+    strategy: ParsingStrategy = "geometry-first"
+
+
 LayoutFamily = Literal["title", "section", "content", "split", "blank"]
 """Тип макета, выведенный из структуры слотов.
 
@@ -107,5 +134,6 @@ class TemplateSchema(Contract):
     schema_version: str = "1.0"
     source: TemplateSource
     canvas: Canvas
+    markup_quality: MarkupQuality = Field(default_factory=MarkupQuality)
     design_tokens: DesignTokens | None = None
     layouts: list[Layout] = Field(min_length=1)
