@@ -15,7 +15,18 @@ from pydantic import Field
 from dpd.models.common import Bounds, Canvas, Contract, TextRun
 from dpd.models.template import LayoutFamily
 
-ElementKind = Literal["text"]
+ElementKind = Literal["text", "table"]
+
+
+class RenderedTable(Contract):
+    """Таблица с оформлением, синтезированным из токенов шаблона."""
+
+    headers: list[str] = Field(default_factory=list)
+    rows: list[list[str]] = Field(default_factory=list)
+    font: str | None = None
+    size_pt: float | None = None
+    header_color: str | None = None
+    body_color: str | None = None
 
 
 class RenderedElement(Contract):
@@ -25,6 +36,7 @@ class RenderedElement(Contract):
     kind: ElementKind
     bounds: Bounds
     runs: list[TextRun] = Field(default_factory=list)
+    table: RenderedTable | None = None
 
 
 class LayoutDecision(Contract):
@@ -50,7 +62,7 @@ class Compensation(Contract):
     за которое к презентациям возникают претензии.
     """
 
-    kind: Literal["fontScale", "truncate"]
+    kind: Literal["fontScale", "truncate", "tableTrim"]
     slot_id: str
     from_value: float | None = None
     to_value: float | None = None

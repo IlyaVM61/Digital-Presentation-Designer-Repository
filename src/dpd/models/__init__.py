@@ -21,6 +21,7 @@ from dpd.models.rendered import (
     LayoutDecision,
     RenderedElement,
     RenderedPresentation,
+    RenderedTable,
     Slide,
 )
 from dpd.models.structure import (
@@ -29,6 +30,8 @@ from dpd.models.structure import (
     SlideBody,
     StructureMeta,
     StructureSlide,
+    TableSpec,
+    Visualization,
 )
 from dpd.models.template import (
     Background,
@@ -71,6 +74,7 @@ __all__ = [
     "PresentationStructure",
     "RenderedElement",
     "RenderedPresentation",
+    "RenderedTable",
     "Severity",
     "Slide",
     "SlideBody",
@@ -79,6 +83,7 @@ __all__ = [
     "SlotOrigin",
     "StructureMeta",
     "StructureSlide",
+    "TableSpec",
     "TemplateSchema",
     "TemplateSource",
     "TextRun",
@@ -86,4 +91,5 @@ __all__ = [
     "Token",
     "TypeScale",
     "VariantGroup",
+    "Visualization",
 ]

@@ -37,6 +37,30 @@ class SlideBody(Contract):
     items: list[str] = Field(default_factory=list)
 
 
+class TableSpec(Contract):
+    """Табличные данные: шапка и строки.
+
+    Ограничение размера накладывает вёрстка, а не замысел: сколько строк
+    поместится, зависит от слота и кегля, а не от содержания.
+    """
+
+    headers: list[str] = Field(default_factory=list)
+    rows: list[list[str]] = Field(default_factory=list)
+
+
+class Visualization(Contract):
+    """Чем показать содержимое слайда.
+
+    Тип визуализации выбирает модель — это вопрос смысла. Оформление
+    синтезирует вёрстка из дизайн-токенов: в 138 слайдах-примерах трёх
+    калибровочных шаблонов всего четыре таблицы и ни одной диаграммы,
+    и копировать оформление не из чего.
+    """
+
+    kind: Literal["table", "chart"]
+    table: TableSpec | None = None
+
+
 class StructureSlide(Contract):
     """Слайд как замысел: что сказать и в какой роли.
 
@@ -50,6 +74,7 @@ class StructureSlide(Contract):
     headline: str
     key_message: str | None = None
     body: SlideBody | None = None
+    visualization: Visualization | None = None
     source_refs: list[str] = Field(default_factory=list)
 
 

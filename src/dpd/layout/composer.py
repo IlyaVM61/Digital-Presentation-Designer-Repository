@@ -17,6 +17,7 @@ from __future__ import annotations
 from dpd.layout.overflow import plan_compensations
 from dpd.layout.selector import select
 from dpd.layout.styling import apply, style_for
+from dpd.layout.tables import build as build_table
 from dpd.models import (
     Compensation,
     Layout,
@@ -27,6 +28,9 @@ from dpd.models import (
     Slot,
     StructureSlide,
     TemplateSchema,
+)
+from dpd.models import (
+    RenderedElement as _RE,
 )
 
 DEFAULT_VARIANT = "A"
@@ -72,8 +76,28 @@ def _compose_slide(
         elements.append(element)
         compensations.extend(applied)
 
-    body_items = slide.body.items if slide.body else []
     body_slot = _first_slot(layout, "body")
+
+    visual = slide.visualization
+    if body_slot is not None and visual is not None and visual.kind == "table" and visual.table:
+        # Визуализация занимает место содержимого: таблица и текст в одном
+        # слоте наложились бы друг на друга.
+        style = style_for(body_slot, tokens, size_shift)
+        styled = body_slot.model_copy(update={"text_style": style})
+        table, applied = build_table(visual.table, styled, tokens)
+        elements.append(
+            _RE(slot_id=body_slot.id, kind="table", bounds=body_slot.bounds, table=table)
+        )
+        compensations.extend(applied)
+        return Slide(
+            id=slide.id,
+            layout_id=layout.id,
+            layout_decision=decision,
+            elements=elements,
+            applied_compensations=compensations,
+        )
+
+    body_items = slide.body.items if slide.body else []
     if body_slot is not None and body_items:
         element, applied = _text_element(
             body_slot, body_items, tokens, template.canvas, scale, size_shift

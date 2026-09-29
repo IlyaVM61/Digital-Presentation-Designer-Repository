@@ -97,6 +97,11 @@ def _fill_slide(pptx_slide, elements: list[RenderedElement], slots: dict[str, Sl
     used: set[int] = set()
     for element in elements:
         slot = slots.get(element.slot_id)
+        if element.kind == "table" and element.table is not None:
+            _write_table(pptx_slide, element, canvas)
+            if slot and slot.placeholder_idx is not None:
+                used.add(slot.placeholder_idx)
+            continue
         placeholder = placeholders.get(slot.placeholder_idx) if slot else None
         if placeholder is not None:
             _write_runs(placeholder.text_frame, element.runs)
@@ -120,6 +125,46 @@ def _new_textbox(pptx_slide, element: RenderedElement, canvas: Canvas):
         Emu(round(element.bounds.w * canvas.width_emu)),
         Emu(round(element.bounds.h * canvas.height_emu)),
     )
+
+
+def _write_table(pptx_slide, element, canvas: Canvas) -> None:
+    """Вставить нативную таблицу PowerPoint.
+
+    Именно нативную: таблица, нарисованная линиями или вставленная
+    картинкой, не редактируется, а ТЗ требует редактируемых объектов.
+    Оформление приходит из вёрстки — синтезированное из токенов шаблона.
+    """
+    table = element.table
+    rows, columns = len(table.rows) + 1, max(len(table.headers), 1)
+    shape = pptx_slide.shapes.add_table(
+        rows,
+        columns,
+        Emu(round(element.bounds.x * canvas.width_emu)),
+        Emu(round(element.bounds.y * canvas.height_emu)),
+        Emu(round(element.bounds.w * canvas.width_emu)),
+        Emu(round(element.bounds.h * canvas.height_emu)),
+    )
+    grid = shape.table
+
+    for column, title in enumerate(table.headers):
+        _fill_cell(grid.cell(0, column), title, table, table.header_color)
+
+    for row_index, row in enumerate(table.rows, start=1):
+        for column, value in enumerate(row):
+            _fill_cell(grid.cell(row_index, column), value, table, table.body_color)
+
+
+def _fill_cell(cell, text: str, table, colour: str | None) -> None:
+    cell.text = ""
+    paragraph = cell.text_frame.paragraphs[0]
+    run = paragraph.add_run()
+    run.text = text
+    if table.font:
+        run.font.name = table.font
+    if table.size_pt:
+        run.font.size = Pt(table.size_pt)
+    if colour:
+        run.font.color.rgb = RGBColor.from_string(colour.lstrip("#"))
 
 
 def _write_runs(text_frame, runs: list[TextRun], slot_style=None) -> None:
