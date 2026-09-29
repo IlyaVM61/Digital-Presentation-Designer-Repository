@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dpd"
+version = "0.1.0"
+description = "Цифровой дизайнер презентаций: сборка слайдов по правилам чужого шаблона"
+requires-python = ">=3.12"
+
+# Зависимости намеренно не перечислены здесь. Состав окружения закреплён
+# точными версиями в `scripts/requirements.txt` (задача T-03), включая
+# транзитивные: два источника истины о зависимостях расходятся тем быстрее,
+# чем важнее воспроизводимость. Сам проект ставится в окружение отдельно:
+#   D:\venvs\dpd\Scripts\python -m pip install -e .
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
