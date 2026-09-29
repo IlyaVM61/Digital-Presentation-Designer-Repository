@@ -30,6 +30,7 @@ from dpd.models.structure import (
 )
 from dpd.models.template import (
     Layout,
+    LayoutFamily,
     Slot,
     SlotKind,
     SlotOrigin,
@@ -51,6 +52,7 @@ __all__ = [
     "Fixability",
     "FontToken",
     "Layout",
+    "LayoutFamily",
     "PresentationStructure",
     "RenderedElement",
     "RenderedPresentation",

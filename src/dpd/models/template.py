@@ -19,6 +19,13 @@ from dpd.models.tokens import DesignTokens
 
 SlotKind = Literal["title", "body", "other"]
 
+LayoutFamily = Literal["title", "section", "content", "split", "blank"]
+"""Тип макета, выведенный из структуры слотов.
+
+`title` — заголовок в композиционном центре; `section` — только заголовок,
+места под содержимое нет; `content` — заголовок-шапка и одно место под
+содержимое; `split` — два и более места; `blank` — слотов нет вовсе."""
+
 SlotOrigin = Literal["placeholder", "shape", "derived"]
 """Как найден слот. Надёжность убывает: плейсхолдер макета, обычная фигура,
 сконструированная область. Распознавание из фигур — основной режим, а не
@@ -85,6 +92,8 @@ class Layout(Contract):
 
     id: str
     name: str
+    family: LayoutFamily = "blank"
+    family_source: str = "structure"
     slots: list[Slot] = Field(default_factory=list)
 
 

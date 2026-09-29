@@ -26,6 +26,7 @@ from dpd.models import (
     TemplateSchema,
     TemplateSource,
 )
+from dpd.parsing.families import classified
 from dpd.parsing.inheritance import StyleResolver
 from dpd.parsing.slots import (
     derived_slot,
@@ -123,7 +124,8 @@ def _parse_layout(layout, master_number: int, canvas: Canvas, resolver: StyleRes
     # мастер объявляет один цвет на все макеты, включая тёмные.
     inherit_colour_from_title(slots)
 
-    return Layout(id=layout_id(layout, master_number), name=layout.name, slots=slots)
+    # Тип выводится из структуры: имена макетов дублируются массово.
+    return classified(Layout(id=layout_id(layout, master_number), name=layout.name, slots=slots))
 
 
 def layout_id(layout, master_number: int) -> str:
