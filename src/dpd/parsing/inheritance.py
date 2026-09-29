@@ -81,7 +81,7 @@ class StyleResolver:
         chain = [("master.txStyles", properties)]
         size_pt, size_from = _first(chain, _size_of)
         font, font_from = _first(chain, _font_of)
-        scheme = self._theme_colours(layout)
+        scheme = self.theme_colours(layout)
         colour, _ = _first(chain, lambda item: _colour_of(item, scheme))
 
         return TextStyle(
@@ -109,7 +109,7 @@ class StyleResolver:
         if font is None:
             font, font_from = DEFAULT_FONT, "default"
 
-        scheme = self._theme_colours(layout)
+        scheme = self.theme_colours(layout)
         colour, _ = _first(chain, lambda properties: _colour_of(properties, scheme))
 
         return TextStyle(
@@ -156,7 +156,7 @@ class StyleResolver:
         role = "major" if _master_style_name(shape) == "titleStyle" else "minor"
         return fonts.get(role)
 
-    def _theme_colours(self, layout) -> dict[str, str]:
+    def theme_colours(self, layout) -> dict[str, str]:
         """Цветовая схема темы: без неё не разрешить ссылки вида `lt1`."""
         master = getattr(layout, "slide_master", None)
         if master is None:

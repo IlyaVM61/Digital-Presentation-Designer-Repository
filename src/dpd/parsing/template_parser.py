@@ -26,6 +26,7 @@ from dpd.models import (
     TemplateSchema,
     TemplateSource,
 )
+from dpd.parsing.background import detect
 from dpd.parsing.families import classified
 from dpd.parsing.inheritance import StyleResolver
 from dpd.parsing.quality import measure
@@ -127,7 +128,14 @@ def _parse_layout(layout, master_number: int, canvas: Canvas, resolver: StyleRes
     inherit_colour_from_title(slots)
 
     # Тип выводится из структуры: имена макетов дублируются массово.
-    return classified(Layout(id=layout_id(layout, master_number), name=layout.name, slots=slots))
+    return classified(
+        Layout(
+            id=layout_id(layout, master_number),
+            name=layout.name,
+            background=detect(layout, canvas, resolver.theme_colours(layout)),
+            slots=slots,
+        )
+    )
 
 
 def layout_id(layout, master_number: int) -> str:

@@ -19,6 +19,23 @@ from dpd.models.tokens import DesignTokens
 
 SlotKind = Literal["title", "body", "other"]
 
+BackgroundKind = Literal["solid", "gradient", "image", "inherited"]
+
+
+class Background(Contract):
+    """Фон макета и вычислимость контраста на нём.
+
+    `contrast_computable` равно `False`, когда цвет под текстом статически
+    неизвестен — фон-изображение или градиент. Тогда проверка 4.5:1 требует
+    рендера и относится к классу `rendered`, а не `file` (решение фазы 6).
+    """
+
+    kind: BackgroundKind = "inherited"
+    value: str | None = None
+    source: str = "master.bg"
+    contrast_computable: bool = True
+
+
 ParsingStrategy = Literal["placeholder-first", "geometry-first", "examples-first"]
 """На что опирается разбор шаблона.
 
@@ -121,6 +138,7 @@ class Layout(Contract):
     name: str
     family: LayoutFamily = "blank"
     family_source: str = "structure"
+    background: Background = Field(default_factory=Background)
     slots: list[Slot] = Field(default_factory=list)
 
 

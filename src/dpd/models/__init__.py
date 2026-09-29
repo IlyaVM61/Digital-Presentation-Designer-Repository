@@ -29,6 +29,8 @@ from dpd.models.structure import (
     StructureSlide,
 )
 from dpd.models.template import (
+    Background,
+    BackgroundKind,
     Layout,
     LayoutFamily,
     MarkupQuality,
@@ -43,6 +45,8 @@ from dpd.models.template import (
 from dpd.models.tokens import ColorToken, DesignTokens, FontToken, Token, TypeScale
 
 __all__ = [
+    "Background",
+    "BackgroundKind",
     "BodyKind",
     "Bounds",
     "Canvas",
