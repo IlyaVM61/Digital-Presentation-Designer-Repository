@@ -52,7 +52,13 @@ def ask(key: str, model: str) -> tuple[bool, str]:
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             body = json.loads(response.read())
-        return True, body["choices"][0]["message"]["content"].strip()
+        message = body["choices"][0]["message"]
+        # Рассуждающие модели (Qwen3 и другие) кладут ответ в `reasoning`, а
+        # `content` оставляют пустым, если лимит токенов не дал завершить
+        # размышление. Пустой `content` — не отказ провайдера, и клиент
+        # модели (T-47) обязан это учитывать.
+        text = (message.get("content") or message.get("reasoning") or "").strip()
+        return True, text[:60] or "пустой ответ (модель рассуждающая)"
     except urllib.error.HTTPError as error:
         return False, f"HTTP {error.code}: {error.read().decode('utf-8', 'replace')[:200]}"
     except Exception as error:  # noqa: BLE001 — сообщаем любую причину отказа
