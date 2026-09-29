@@ -27,6 +27,8 @@ from dpd.models import (
     TemplateSource,
 )
 from dpd.parsing.background import detect
+from dpd.parsing.cache import load as load_cached
+from dpd.parsing.cache import store as store_cached
 from dpd.parsing.families import classified
 from dpd.parsing.inheritance import StyleResolver
 from dpd.parsing.quality import measure
@@ -45,11 +47,20 @@ _TITLE_PLACEHOLDERS = {PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE}
 _BODY_PLACEHOLDERS = {PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.SUBTITLE, PP_PLACEHOLDER.OBJECT}
 
 
-def parse_template(path: str | Path) -> TemplateSchema:
-    """Разобрать шаблон презентации в `TemplateSchema`."""
+def parse_template(path: str | Path, use_cache: bool = True) -> TemplateSchema:
+    """Разобрать шаблон презентации в `TemplateSchema`.
+
+    Результат кешируется по хешу файла и версии парсера. `use_cache=False`
+    нужен при отладке разбора: иначе правки кода не видны, пока кеш цел.
+    """
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"шаблон не найден: {path}")
+
+    if use_cache:
+        cached = load_cached(path)
+        if cached is not None:
+            return cached
 
     presentation = Presentation(str(path))
     canvas = Canvas(
@@ -69,7 +80,7 @@ def parse_template(path: str | Path) -> TemplateSchema:
         layout.model_copy(update={"color_scheme": colour_scheme(layout)}) for layout in layouts
     ])
 
-    return TemplateSchema(
+    schema = TemplateSchema(
         markup_quality=measure(presentation),
         design_tokens=extract_design_tokens(presentation),
         source=TemplateSource(
@@ -80,6 +91,10 @@ def parse_template(path: str | Path) -> TemplateSchema:
         canvas=canvas,
         layouts=layouts,
     )
+
+    if use_cache:
+        store_cached(path, schema)
+    return schema
 
 
 def _parse_layout(layout, master_number: int, canvas: Canvas, resolver: StyleResolver) -> Layout:

@@ -13,6 +13,7 @@
 Реализован минимальный разбор (T-06): холст, макеты, слоты из плейсхолдеров.
 """
 
+from dpd.parsing.cache import clear_cache
 from dpd.parsing.inheritance import StyleResolver
 from dpd.parsing.template_parser import PARSER_VERSION, layout_id, parse_template
 from dpd.parsing.tokens import extract_design_tokens
@@ -20,6 +21,7 @@ from dpd.parsing.tokens import extract_design_tokens
 __all__ = [
     "PARSER_VERSION",
     "StyleResolver",
+    "clear_cache",
     "extract_design_tokens",
     "layout_id",
     "parse_template",
