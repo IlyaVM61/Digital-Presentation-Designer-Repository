@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from dpd.layout.selector import select
+from dpd.layout.styling import apply, style_for
 from dpd.models import (
     Layout,
     PresentationStructure,
@@ -24,7 +25,6 @@ from dpd.models import (
     Slot,
     StructureSlide,
     TemplateSchema,
-    TextRun,
 )
 
 DEFAULT_VARIANT = "A"
@@ -48,14 +48,16 @@ def _compose_slide(slide: StructureSlide, template: TemplateSchema) -> Slide:
     layout, decision = select(slide, template.layouts)
     elements: list[RenderedElement] = []
 
+    tokens = template.design_tokens
+
     title_slot = _first_slot(layout, "title")
     if title_slot is not None:
-        elements.append(_text_element(title_slot, [slide.headline]))
+        elements.append(_text_element(title_slot, [slide.headline], tokens))
 
     body_items = slide.body.items if slide.body else []
     body_slot = _first_slot(layout, "body")
     if body_slot is not None and body_items:
-        elements.append(_text_element(body_slot, body_items))
+        elements.append(_text_element(body_slot, body_items, tokens))
 
     return Slide(
         id=slide.id,
@@ -69,21 +71,21 @@ def _first_slot(layout: Layout, kind: str) -> Slot | None:
     return next((slot for slot in layout.slots if slot.kind == kind), None)
 
 
-def _text_element(slot: Slot, paragraphs: list[str]) -> RenderedElement:
+def _text_element(slot: Slot, paragraphs: list[str], tokens=None) -> RenderedElement:
     """Уложить текст в слот.
 
     Геометрия берётся из слота без изменений: вёрстка не выдумывает
     координаты, а применяет правила шаблона. Переполнение здесь не
     обрабатывается — это задача T-22.
 
-    Один `TextRun` соответствует одному абзацу. Свойства оформления не
-    задаются намеренно: текст попадёт в плейсхолдер макета, и PowerPoint
-    применит к нему оформление шаблона сам. Явные кегли и цвета появятся
-    с применением дизайн-токенов (T-21).
+    Один `TextRun` соответствует одному абзацу. Оформление задаётся явно и
+    берётся из правил шаблона: стиль слота, разрешённый по цепочке
+    наследования, с опорой на дизайн-токены там, где слот молчит.
     """
+    style = style_for(slot, tokens)
     return RenderedElement(
         slot_id=slot.id,
         kind="text",
         bounds=slot.bounds,
-        runs=[TextRun(text=paragraph) for paragraph in paragraphs],
+        runs=[apply(style, paragraph) for paragraph in paragraphs],
     )
