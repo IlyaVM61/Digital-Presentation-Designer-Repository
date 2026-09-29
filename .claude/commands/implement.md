@@ -14,7 +14,7 @@
 Развёрнуто и проверено. Системный Python не использовать — все команды через окружение проекта:
 
 ```bash
-D:\venvs\dpd\Scripts\python     # Python 3.12.10, 55 пакетов
+D:\venvs\dpd\Scripts\python     # Python 3.12.10, 54 пакета плюс сам проект (pip install -e .)
 D:\venvs\dpd\Scripts\pytest     # тесты
 D:\venvs\dpd\Scripts\ruff       # линтер
 D:\LibreOffice\program\soffice.com --headless --convert-to pdf   # PPTX → PDF
