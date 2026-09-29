@@ -31,6 +31,7 @@ from dpd.models.structure import (
 from dpd.models.template import (
     Background,
     BackgroundKind,
+    ColorScheme,
     Layout,
     LayoutFamily,
     MarkupQuality,
@@ -41,6 +42,7 @@ from dpd.models.template import (
     TemplateSchema,
     TemplateSource,
     TextStyle,
+    VariantGroup,
 )
 from dpd.models.tokens import ColorToken, DesignTokens, FontToken, Token, TypeScale
 
@@ -50,6 +52,7 @@ __all__ = [
     "BodyKind",
     "Bounds",
     "Canvas",
+    "ColorScheme",
     "ColorToken",
     "Contract",
     "DesignTokens",
@@ -78,4 +81,5 @@ __all__ = [
     "TextStyle",
     "Token",
     "TypeScale",
+    "VariantGroup",
 ]

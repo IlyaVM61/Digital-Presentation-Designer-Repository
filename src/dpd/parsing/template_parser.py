@@ -37,6 +37,7 @@ from dpd.parsing.slots import (
     shape_slots,
 )
 from dpd.parsing.tokens import extract_design_tokens
+from dpd.parsing.variants import colour_scheme, group
 
 PARSER_VERSION = "0.1.0"
 
@@ -62,6 +63,11 @@ def parse_template(path: str | Path) -> TemplateSchema:
         for master_number, master in enumerate(presentation.slide_masters, start=1)
         for layout in master.slide_layouts
     ]
+    # Цветовые вариации связываются после разбора всех макетов: группа
+    # существует только относительно других макетов того же типа.
+    layouts = group([
+        layout.model_copy(update={"color_scheme": colour_scheme(layout)}) for layout in layouts
+    ])
 
     return TemplateSchema(
         markup_quality=measure(presentation),

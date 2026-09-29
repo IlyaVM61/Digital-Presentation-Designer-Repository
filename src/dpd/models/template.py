@@ -21,6 +21,21 @@ SlotKind = Literal["title", "body", "other"]
 
 BackgroundKind = Literal["solid", "gradient", "image", "inherited"]
 
+ColorScheme = Literal["light", "dark", "unknown"]
+
+
+class VariantGroup(Contract):
+    """Макеты, различающиеся только цветовой схемой.
+
+    Готовый механизм визуального различения вариантов колоды: используются
+    родные макеты шаблона. Единственной осью различий быть не может —
+    в шаблоне вариаций может не оказаться вовсе (ADR-0004).
+    """
+
+    family: str
+    siblings: list[str] = Field(default_factory=list)
+    differs_by: str = "colorScheme"
+
 
 class Background(Contract):
     """Фон макета и вычислимость контраста на нём.
@@ -139,6 +154,8 @@ class Layout(Contract):
     family: LayoutFamily = "blank"
     family_source: str = "structure"
     background: Background = Field(default_factory=Background)
+    color_scheme: ColorScheme = "unknown"
+    variant_group: VariantGroup | None = None
     slots: list[Slot] = Field(default_factory=list)
 
 
