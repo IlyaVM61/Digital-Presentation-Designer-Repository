@@ -9,4 +9,24 @@
 
 Обёртка скрывает LibreOffice за интерфейсом: смена рендерера не затрагивает
 остальные слои.
+
+Реализован рендер в изображения (T-09). Подсветка находок — задача T-35.
 """
+
+from dpd.render.renderer import (
+    DEFAULT_DPI,
+    DEFAULT_TIMEOUT_SEC,
+    convert_to_pdf,
+    render_pdf_pages,
+    render_slides,
+    soffice_path,
+)
+
+__all__ = [
+    "DEFAULT_DPI",
+    "DEFAULT_TIMEOUT_SEC",
+    "convert_to_pdf",
+    "render_pdf_pages",
+    "render_slides",
+    "soffice_path",
+]

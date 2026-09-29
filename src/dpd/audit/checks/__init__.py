@@ -8,4 +8,14 @@
 считается по пикселям, а не по кодам цветов, но алгоритмом, а не моделью.
 В 62% макетов одного из калибровочных шаблонов фоном служит изображение,
 поэтому проверка 4.5:1 гибридная.
+
+Реализована `integrity.raster_slide` (T-10). Общий каркас проверки как
+единицы — задача T-27; до неё проверки вызываются напрямую.
 """
+
+from dpd.audit.checks.integrity import (
+    DEFAULT_COVERAGE_THRESHOLD,
+    check_raster_slide,
+)
+
+__all__ = ["DEFAULT_COVERAGE_THRESHOLD", "check_raster_slide"]

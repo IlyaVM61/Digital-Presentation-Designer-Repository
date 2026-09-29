@@ -1,0 +1,48 @@
+"""`RenderedPresentation` — выход слоя вёрстки и вход экспорта.
+
+**Минимальный срез задачи T-05.** Нормативное описание в
+`docs/04-architecture/pipeline-architecture.md` шире: `appliedCompensations`
+(T-22), элементы-диаграммы и таблицы (T-23, T-24), `layoutFamily` (T-14).
+Здесь только текст — ровно то, что нужно вертикальному срезу.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import Field
+
+from dpd.models.common import Bounds, Canvas, Contract, TextRun
+
+ElementKind = Literal["text"]
+
+
+class RenderedElement(Contract):
+    """Содержимое, уложенное в слот, с окончательной геометрией в долях."""
+
+    slot_id: str
+    kind: ElementKind
+    bounds: Bounds
+    runs: list[TextRun] = Field(default_factory=list)
+
+
+class Slide(Contract):
+    """Слайд, собранный на макете шаблона."""
+
+    id: str
+    layout_id: str
+    elements: list[RenderedElement] = Field(default_factory=list)
+
+
+class RenderedPresentation(Contract):
+    """Колода, готовая к экспорту.
+
+    Один из трёх вариантов вёрстки. Экспорт ничего не досчитывает: все решения
+    о композиции, цвете и кегле приняты раньше, здесь доли лишь пересчитываются
+    в EMU под холст шаблона.
+    """
+
+    variant: str
+    template_hash: str
+    canvas: Canvas
+    slides: list[Slide] = Field(default_factory=list)

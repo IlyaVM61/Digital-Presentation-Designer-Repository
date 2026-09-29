@@ -1,0 +1,78 @@
+"""`TemplateSchema` — единственный выход слоя парсинга и источник правил шаблона.
+
+**Минимальный срез задачи T-05.** Нормативное описание в
+`docs/04-architecture/template-schema.md` шире: `markupQuality` (T-15),
+`designTokens` (T-12), `background` (T-17), `variantGroup` (T-18),
+`fixedElements`, `guides` и `warnings` появятся своими задачами. Здесь ровно
+то, без чего не собрать вертикальный срез T-06 … T-09.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Literal
+
+from pydantic import Field
+
+from dpd.models.common import Bounds, Canvas, Contract
+
+SlotKind = Literal["title", "body", "other"]
+
+SlotOrigin = Literal["placeholder", "shape", "derived"]
+"""Как найден слот. Надёжность убывает: плейсхолдер макета, обычная фигура,
+сконструированная область. Распознавание из фигур — основной режим, а не
+фолбэк: в двух калибровочных шаблонах из трёх у большинства макетов есть
+только плейсхолдер заголовка."""
+
+
+class TemplateSource(Contract):
+    """Происхождение схемы: по хешу файла работает кеширование разбора (T-19)."""
+
+    file: str
+    hash: str
+    parsed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    parser_version: str = "0.1.0"
+
+
+class Slot(Contract):
+    """Место в макете, куда вёрстка кладёт содержимое.
+
+    `placeholder_idx` заполняется только при `origin="placeholder"`. По нему
+    экспорт находит родной плейсхолдер макета и кладёт текст в него, а не
+    рядом: тогда оформление — шрифт, кегль, цвет — применяется шаблоном
+    автоматически. Для слотов, выведенных из обычных фигур (T-13),
+    плейсхолдера не существует, и экспорт создаёт текстовую рамку по
+    координатам.
+    """
+
+    id: str
+    kind: SlotKind
+    origin: SlotOrigin
+    bounds: Bounds
+    placeholder_idx: int | None = None
+
+
+class Layout(Contract):
+    """Макет шаблона.
+
+    `name` хранится, но доверия к нему нет: в одном из калибровочных шаблонов
+    11 макетов из 15 называются одинаково. Тип макета выводится из структуры
+    слотов — поле `family` появится задачей T-14.
+    """
+
+    id: str
+    name: str
+    slots: list[Slot] = Field(default_factory=list)
+
+
+class TemplateSchema(Contract):
+    """Перевод произвольного `.pptx` в набор машинно применимых правил.
+
+    Всё, что слои вёрстки и аудита знают о шаблоне, они знают отсюда: свойства,
+    которого нет в схеме, для системы не существует.
+    """
+
+    schema_version: str = "1.0"
+    source: TemplateSource
+    canvas: Canvas
+    layouts: list[Layout] = Field(min_length=1)

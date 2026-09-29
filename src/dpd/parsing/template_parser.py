@@ -1,0 +1,172 @@
+"""Минимальный разбор `.pptx`: холст, макеты, слоты из плейсхолдеров.
+
+**Минимальный срез задачи T-06.** Здесь ровно то, без чего не собрать
+вертикальный срез. Не делается: разрешение цепочки наследования свойств
+(T-11), извлечение дизайн-токенов (T-12), распознавание слотов из обычных
+фигур (T-13) — а это основной режим работы на реальных шаблонах, —
+классификация макетов (T-14) и всё остальное из `template-schema.md`.
+
+Слой детерминированный: моделей не вызывает.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+
+from pptx import Presentation
+from pptx.enum.shapes import PP_PLACEHOLDER
+
+from dpd.models import (
+    Bounds,
+    Canvas,
+    Layout,
+    Slot,
+    SlotKind,
+    TemplateSchema,
+    TemplateSource,
+)
+
+PARSER_VERSION = "0.1.0"
+
+_TITLE_PLACEHOLDERS = {PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE}
+_BODY_PLACEHOLDERS = {PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.SUBTITLE, PP_PLACEHOLDER.OBJECT}
+
+
+def parse_template(path: str | Path) -> TemplateSchema:
+    """Разобрать шаблон презентации в `TemplateSchema`."""
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"шаблон не найден: {path}")
+
+    presentation = Presentation(str(path))
+    canvas = Canvas(
+        width_emu=presentation.slide_width,
+        height_emu=presentation.slide_height,
+    )
+
+    layouts = [
+        _parse_layout(layout, master_number, canvas)
+        for master_number, master in enumerate(presentation.slide_masters, start=1)
+        for layout in master.slide_layouts
+    ]
+
+    return TemplateSchema(
+        source=TemplateSource(
+            file=path.name,
+            hash=f"sha256:{_file_hash(path)}",
+            parser_version=PARSER_VERSION,
+        ),
+        canvas=canvas,
+        layouts=layouts,
+    )
+
+
+def _parse_layout(layout, master_number: int, canvas: Canvas) -> Layout:
+    """Собрать макет.
+
+    Идентификатор строится из имени части пакета, а не из имени макета:
+    имена дублируются массово — в одном калибровочном шаблоне 11 макетов
+    из 15 называются одинаково, — и адресовать по ним нельзя.
+    """
+    master_placeholders = {
+        placeholder.placeholder_format.idx: placeholder
+        for placeholder in layout.slide_master.placeholders
+    }
+
+    slots: list[Slot] = []
+    counters: dict[str, int] = {}
+    for placeholder in layout.placeholders:
+        bounds = _resolve_bounds(placeholder, master_placeholders, canvas)
+        if bounds is None:
+            continue
+        kind = _slot_kind(placeholder)
+        slots.append(
+            Slot(
+                id=_slot_id(kind, counters),
+                kind=kind,
+                origin="placeholder",
+                bounds=bounds,
+                placeholder_idx=placeholder.placeholder_format.idx,
+            )
+        )
+
+    return Layout(id=layout_id(layout, master_number), name=layout.name, slots=slots)
+
+
+def layout_id(layout, master_number: int) -> str:
+    """Идентификатор макета: `master1/layout8`.
+
+    Строится из имени части пакета, а не из имени макета: имена дублируются
+    массово — в одном калибровочном шаблоне 11 макетов из 15 называются
+    одинаково. Функция публичная, потому что экспорт открывает тот же файл и
+    обязан получить те же идентификаторы; продублированное правило рано или
+    поздно разошлось бы.
+    """
+    part_name = Path(str(layout.part.partname)).stem  # slideLayout8
+    return f"master{master_number}/{part_name.replace('slideLayout', 'layout')}"
+
+
+def _slot_kind(placeholder) -> SlotKind:
+    placeholder_type = placeholder.placeholder_format.type
+    if placeholder_type in _TITLE_PLACEHOLDERS:
+        return "title"
+    if placeholder_type in _BODY_PLACEHOLDERS:
+        return "body"
+    return "other"
+
+
+def _slot_id(kind: SlotKind, counters: dict[str, int]) -> str:
+    counters[kind] = counters.get(kind, 0) + 1
+    if kind == "title" and counters[kind] == 1:
+        return "title"
+    return f"{kind}-{counters[kind]}"
+
+
+def _resolve_bounds(placeholder, master_placeholders: dict, canvas: Canvas) -> Bounds | None:
+    """Геометрия плейсхолдера, при отсутствии — унаследованная от мастера.
+
+    Плейсхолдер макета часто не несёт собственных координат и берёт их у
+    одноимённого плейсхолдера мастера. Это не порча файла, а норма OOXML:
+    парсер, требующий явных значений, откажет на обычном корпоративном
+    шаблоне. Полное разрешение цепочки свойств — задача T-11, здесь
+    наследуется только геометрия, без которой слот не выразить.
+    """
+    geometry = _geometry(placeholder)
+    if geometry is None:
+        inherited = master_placeholders.get(placeholder.placeholder_format.idx)
+        geometry = _geometry(inherited) if inherited is not None else None
+    if geometry is None:
+        return None
+
+    left, top, width, height = geometry
+    return Bounds(
+        x=_fraction(left, canvas.width_emu),
+        y=_fraction(top, canvas.height_emu),
+        w=_fraction(width, canvas.width_emu),
+        h=_fraction(height, canvas.height_emu),
+    )
+
+
+def _geometry(shape) -> tuple[int, int, int, int] | None:
+    values = (shape.left, shape.top, shape.width, shape.height)
+    return None if any(value is None for value in values) else values
+
+
+def _fraction(value: int, total: int) -> float:
+    """Доля холста, прижатая к [0, 1].
+
+    Прижатие нужно, потому что фигуры за краем холста встречаются в реальных
+    шаблонах: элемент, уехавший влево, дал бы отрицательную долю, контракт
+    отверг бы её, и разбор упал бы на файле, который PowerPoint открывает
+    без жалоб. Терять слот целиком хуже, чем сместить его край.
+    """
+    return min(max(value / total, 0.0), 1.0)
+
+
+def _file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
