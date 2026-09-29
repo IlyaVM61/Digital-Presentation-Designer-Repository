@@ -1,0 +1,39 @@
+# Нормализация переводов строк: в репозитории LF, в рабочей копии — по
+# настройкам платформы. Проект ведётся на Windows, поэтому без этой строки
+# в историю попадут CRLF.
+* text=auto
+
+# Текстовые файлы
+*.md   text
+*.txt  text
+*.json text
+*.yml  text
+*.yaml text
+*.toml text
+*.py   text
+*.ts   text
+*.tsx  text
+*.js   text
+*.css  text
+*.html text
+
+# Презентации и документы: бинарные, не диффить и не нормализовать.
+# Без этого git испортит .pptx при нормализации переводов строк.
+*.pptx binary
+*.potx binary
+*.ppt  binary
+*.pdf  binary
+*.docx binary
+*.xlsx binary
+
+# Изображения и шрифты
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.svg  text
+*.ico  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.otf  binary
