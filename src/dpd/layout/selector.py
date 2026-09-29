@@ -1,0 +1,118 @@
+"""Выбор макета под тип слайда с деградацией.
+
+**Отказ здесь недопустим.** Шаблон комиссии может не иметь макета под нужный
+тип: в VK WorkSpace нет ни одного макета с двумя местами под содержимое.
+Вёрстка обязана собрать слайд на ближайшем подходящем и сказать об этом, а
+не остановить прогон.
+
+Деградация идёт по цепочкам предпочтений, а не «берём что попало»: для
+контентного слайда ближайший — разделённый макет, затем титульный; для
+титульного — разделитель, затем контентный. Порядок отражает, насколько
+сильно пострадает замысел.
+
+Слой детерминированный: моделей не вызывает.
+"""
+
+from __future__ import annotations
+
+from dpd.models import Layout, LayoutDecision, LayoutFamily, StructureSlide
+
+ROLE_TO_FAMILY: dict[str, LayoutFamily] = {
+    "title": "title",
+    "cover": "title",
+    "agenda": "content",
+    "section": "section",
+    "divider": "section",
+    "data": "content",
+    "quote": "title",
+    "process": "split",
+    "comparison": "split",
+    "summary": "content",
+    "closing": "title",
+}
+"""Роль слайда из замысла → тип макета. Роль вне таблицы считается
+контентной: это самый безобидный выбор по умолчанию."""
+
+DEFAULT_FAMILY: LayoutFamily = "content"
+
+FALLBACK_ORDER: dict[LayoutFamily, tuple[LayoutFamily, ...]] = {
+    "content": ("split", "title", "section", "blank"),
+    "split": ("content", "title", "section", "blank"),
+    "title": ("section", "content", "split", "blank"),
+    "section": ("title", "content", "split", "blank"),
+    "blank": ("content", "split", "title", "section"),
+}
+
+
+def requested_family(slide: StructureSlide) -> LayoutFamily:
+    """Какой тип макета нужен слайду по его роли и содержимому."""
+    family = ROLE_TO_FAMILY.get(slide.role, DEFAULT_FAMILY)
+    # Роль может просить титульный макет, но если контент есть, класть его
+    # некуда: содержимое важнее номинального типа.
+    if family in ("title", "section") and slide.body and slide.body.items:
+        return DEFAULT_FAMILY
+    return family
+
+
+def select(slide: StructureSlide, layouts: list[Layout]) -> tuple[Layout, LayoutDecision]:
+    """Выбрать макет и объяснить выбор."""
+    wanted = requested_family(slide)
+    needs_content = bool(slide.body and slide.body.items)
+
+    exact = _ranked(layouts, wanted, needs_content)
+    if exact:
+        chosen = exact[0]
+        return chosen, LayoutDecision(
+            requested_family=wanted,
+            chosen_family=chosen.family,
+            layout_id=chosen.id,
+            degraded=False,
+            reason="макет нужного типа найден",
+        )
+
+    for candidate in FALLBACK_ORDER.get(wanted, ()):
+        available = _ranked(layouts, candidate, needs_content)
+        if available:
+            chosen = available[0]
+            return chosen, LayoutDecision(
+                requested_family=wanted,
+                chosen_family=chosen.family,
+                layout_id=chosen.id,
+                degraded=True,
+                reason=(
+                    f"в шаблоне нет макета типа «{wanted}»; "
+                    f"выбран ближайший — «{candidate}»"
+                ),
+            )
+
+    # Тип не нашёлся вовсе: берём любой, где есть место под содержимое.
+    with_room = [layout for layout in layouts if _has_content_slot(layout)]
+    chosen = (with_room or layouts)[0]
+    return chosen, LayoutDecision(
+        requested_family=wanted,
+        chosen_family=chosen.family,
+        layout_id=chosen.id,
+        degraded=True,
+        reason="подходящего типа не нашлось, взят первый макет шаблона",
+    )
+
+
+def _ranked(layouts: list[Layout], family: LayoutFamily, needs_content: bool) -> list[Layout]:
+    """Макеты нужного типа, пригодные вперёд непригодных.
+
+    Тип макета — не единственный критерий. Макет, помеченный контентным, но
+    без места под содержимое, для слайда с текстом бесполезен: текст просто
+    пропадёт. Поэтому при равном типе вперёд идут те, куда есть что класть.
+
+    Порядок внутри групп сохраняется — он задан разбором шаблона, и
+    перестановка сделала бы выбор невоспроизводимым.
+    """
+    candidates = [layout for layout in layouts if layout.family == family]
+    if not needs_content:
+        return candidates
+    suitable = [layout for layout in candidates if _has_content_slot(layout)]
+    return suitable + [layout for layout in candidates if layout not in suitable]
+
+
+def _has_content_slot(layout: Layout) -> bool:
+    return any(slot.kind != "title" for slot in layout.slots)

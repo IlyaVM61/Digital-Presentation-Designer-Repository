@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from dpd.layout.selector import select
 from dpd.models import (
     Layout,
     PresentationStructure,
@@ -44,7 +45,7 @@ def compose(
 
 
 def _compose_slide(slide: StructureSlide, template: TemplateSchema) -> Slide:
-    layout = _select_layout(slide, template)
+    layout, decision = select(slide, template.layouts)
     elements: list[RenderedElement] = []
 
     title_slot = _first_slot(layout, "title")
@@ -56,32 +57,12 @@ def _compose_slide(slide: StructureSlide, template: TemplateSchema) -> Slide:
     if body_slot is not None and body_items:
         elements.append(_text_element(body_slot, body_items))
 
-    return Slide(id=slide.id, layout_id=layout.id, elements=elements)
-
-
-def _select_layout(slide: StructureSlide, template: TemplateSchema) -> Layout:
-    """Выбрать макет под слайд.
-
-    Предпочитается макет, несущий и заголовок, и место для текста. Если таких
-    нет, берётся макет хотя бы с заголовком, и слайд собирается без текста:
-    в двух калибровочных шаблонах из трёх большинство макетов несёт только
-    плейсхолдер заголовка, и отказ здесь означал бы отказ на реальном
-    корпоративном шаблоне.
-
-    Выбор детерминирован: при равенстве условий берётся первый по порядку
-    макет схемы, а порядок задан разбором шаблона.
-    """
-    needs_body = bool(slide.body and slide.body.items)
-    with_title = [layout for layout in template.layouts if _first_slot(layout, "title")]
-
-    if needs_body:
-        with_body = [layout for layout in with_title if _first_slot(layout, "body")]
-        if with_body:
-            return with_body[0]
-
-    if with_title:
-        return with_title[0]
-    return template.layouts[0]
+    return Slide(
+        id=slide.id,
+        layout_id=layout.id,
+        layout_decision=decision,
+        elements=elements,
+    )
 
 
 def _first_slot(layout: Layout, kind: str) -> Slot | None:

@@ -17,6 +17,7 @@ from dpd.models.audit import Finding, Fixability, Severity
 from dpd.models.common import Bounds, Canvas, Contract, TextRun
 from dpd.models.rendered import (
     ElementKind,
+    LayoutDecision,
     RenderedElement,
     RenderedPresentation,
     Slide,
@@ -61,6 +62,7 @@ __all__ = [
     "Fixability",
     "FontToken",
     "Layout",
+    "LayoutDecision",
     "LayoutFamily",
     "MarkupQuality",
     "ParsingStrategy",

@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import Field
 
 from dpd.models.common import Bounds, Canvas, Contract, TextRun
+from dpd.models.template import LayoutFamily
 
 ElementKind = Literal["text"]
 
@@ -26,11 +27,27 @@ class RenderedElement(Contract):
     runs: list[TextRun] = Field(default_factory=list)
 
 
+class LayoutDecision(Contract):
+    """Почему слайд собран именно на этом макете.
+
+    `degraded` означает, что макета нужного типа в шаблоне не нашлось и взят
+    ближайший. Скрывать это нельзя: пользователь должен понимать, что
+    получил, а отчёт — объяснять, почему слайд выглядит не так, как задумано.
+    """
+
+    requested_family: LayoutFamily
+    chosen_family: LayoutFamily
+    layout_id: str
+    degraded: bool = False
+    reason: str = ""
+
+
 class Slide(Contract):
     """Слайд, собранный на макете шаблона."""
 
     id: str
     layout_id: str
+    layout_decision: LayoutDecision | None = None
     elements: list[RenderedElement] = Field(default_factory=list)
 
 
