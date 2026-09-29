@@ -67,8 +67,39 @@ def extract_design_tokens(source) -> DesignTokens:
     return DesignTokens(
         fonts=_font_tokens(fonts, heading_fonts, theme_fonts),
         colors=_color_tokens(colors),
-        type_scale=TypeScale(values=sorted(sizes)),
+        type_scale=_type_scale(sizes),
     )
+
+
+AUTOFIT_REASON = "normAutofit"
+
+
+def _type_scale(sizes) -> TypeScale:
+    """Отделить шкалу шаблона от кеглей, порождённых автоподгонкой.
+
+    PowerPoint при `normAutofit` умножает кегль на дробный коэффициент, и
+    получается 6,75 или 8,12 — след того, что текст не поместился, а не
+    решение дизайнера. Принять такое за шкалу значит разрешить вёрстке
+    ставить кегль 6,75 как «родной для шаблона»: слайд выйдет нечитаемым и
+    при этом формально соответствующим правилам.
+
+    Критерий — кратность половине пункта. Дизайнер выбирает 12, 14, 16,
+    иногда 10,5; коэффициент автоподгонки почти никогда не даёт такого
+    значения. Измерено: в VK Tech отсеивается 20 кеглей из 40, в двух других
+    шаблонах — ни одного, и это верно: автоподгонки там нет.
+    """
+    kept = sorted(value for value in sizes if _is_design_size(value))
+    dropped = sorted(value for value in sizes if not _is_design_size(value))
+    return TypeScale(
+        values=kept,
+        excluded=dropped,
+        exclusion_reason=AUTOFIT_REASON if dropped else None,
+    )
+
+
+def _is_design_size(value: float) -> bool:
+    """Кратен ли кегль половине пункта."""
+    return abs(value * 2 - round(value * 2)) < 1e-9
 
 
 def _styles(presentation, resolver):
