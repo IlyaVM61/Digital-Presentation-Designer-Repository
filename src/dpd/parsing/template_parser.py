@@ -1,10 +1,10 @@
 """Минимальный разбор `.pptx`: холст, макеты, слоты из плейсхолдеров.
 
-**Минимальный срез задачи T-06.** Здесь ровно то, без чего не собрать
-вертикальный срез. Не делается: разрешение цепочки наследования свойств
-(T-11), извлечение дизайн-токенов (T-12), распознавание слотов из обычных
-фигур (T-13) — а это основной режим работы на реальных шаблонах, —
-классификация макетов (T-14) и всё остальное из `template-schema.md`.
+**Задачи T-06, T-11, T-12, T-13.** Разбираются холст, макеты и слоты трёх
+происхождений; свойства текста разрешаются по цепочке наследования; токены
+извлекаются частотным анализом разметки. Не делается: классификация макетов
+(T-14), метрика качества разметки (T-15), очистка типографической шкалы
+(T-16), вид фона (T-17) и группировка вариантов (T-18).
 
 Слой детерминированный: моделей не вызывает.
 """
@@ -26,6 +26,14 @@ from dpd.models import (
     TemplateSchema,
     TemplateSource,
 )
+from dpd.parsing.inheritance import StyleResolver
+from dpd.parsing.slots import (
+    derived_slot,
+    inherit_colour_from_title,
+    obstacles,
+    shape_slots,
+)
+from dpd.parsing.tokens import extract_design_tokens
 
 PARSER_VERSION = "0.1.0"
 
@@ -45,13 +53,15 @@ def parse_template(path: str | Path) -> TemplateSchema:
         height_emu=presentation.slide_height,
     )
 
+    resolver = StyleResolver(presentation)
     layouts = [
-        _parse_layout(layout, master_number, canvas)
+        _parse_layout(layout, master_number, canvas, resolver)
         for master_number, master in enumerate(presentation.slide_masters, start=1)
         for layout in master.slide_layouts
     ]
 
     return TemplateSchema(
+        design_tokens=extract_design_tokens(presentation),
         source=TemplateSource(
             file=path.name,
             hash=f"sha256:{_file_hash(path)}",
@@ -62,7 +72,7 @@ def parse_template(path: str | Path) -> TemplateSchema:
     )
 
 
-def _parse_layout(layout, master_number: int, canvas: Canvas) -> Layout:
+def _parse_layout(layout, master_number: int, canvas: Canvas, resolver: StyleResolver) -> Layout:
     """Собрать макет.
 
     Идентификатор строится из имени части пакета, а не из имени макета:
@@ -88,8 +98,30 @@ def _parse_layout(layout, master_number: int, canvas: Canvas) -> Layout:
                 origin="placeholder",
                 bounds=bounds,
                 placeholder_idx=placeholder.placeholder_format.idx,
+                text_style=resolver.resolve_slot(placeholder, layout),
             )
         )
+
+    # Слот не равен плейсхолдеру: в двух шаблонах из трёх контент размечен
+    # обычными фигурами, и это основной режим, а не фолбэк.
+    slots.extend(shape_slots(layout, canvas, slots, counters, resolver))
+
+    # Если места под содержимое так и не нашлось, оно конструируется: иначе
+    # вёрстка соберёт слайд из одного заголовка.
+    if not any(slot.kind != "title" for slot in slots):
+        constructed = derived_slot(
+            canvas,
+            slots,
+            counters,
+            obstacles(layout, canvas),
+            resolver.resolve_body_style(layout),
+        )
+        if constructed is not None:
+            slots.append(constructed)
+
+    # Цвет текста для слотов, которых нет в разметке, берётся от заголовка:
+    # мастер объявляет один цвет на все макеты, включая тёмные.
+    inherit_colour_from_title(slots)
 
     return Layout(id=layout_id(layout, master_number), name=layout.name, slots=slots)
 

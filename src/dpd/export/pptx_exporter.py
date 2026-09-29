@@ -23,6 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pptx import Presentation
+from pptx.dml.color import RGBColor
 from pptx.util import Emu, Pt
 
 from dpd.models import (
@@ -101,7 +102,8 @@ def _fill_slide(pptx_slide, elements: list[RenderedElement], slots: dict[str, Sl
             _write_runs(placeholder.text_frame, element.runs)
             used.add(slot.placeholder_idx)
         else:
-            _write_runs(_new_textbox(pptx_slide, element, canvas).text_frame, element.runs)
+            textbox = _new_textbox(pptx_slide, element, canvas)
+            _write_runs(textbox.text_frame, element.runs, slot.text_style if slot else None)
 
     _remove_empty_placeholders(pptx_slide, used)
 
@@ -120,14 +122,32 @@ def _new_textbox(pptx_slide, element: RenderedElement, canvas: Canvas):
     )
 
 
-def _write_runs(text_frame, runs: list[TextRun]) -> None:
-    """Записать абзацы. Один `TextRun` — один абзац."""
+def _write_runs(text_frame, runs: list[TextRun], slot_style=None) -> None:
+    """Записать абзацы. Один `TextRun` — один абзац.
+
+    `slot_style` применяется только к рамкам, созданным нами: у родного
+    плейсхолдера оформление уже есть, и навязывать ему своё значило бы
+    подменять правила шаблона собственными.
+    """
     text_frame.clear()
+    text_frame.word_wrap = True
     for number, run in enumerate(runs):
         paragraph = text_frame.paragraphs[0] if number == 0 else text_frame.add_paragraph()
         written = paragraph.add_run()
         written.text = run.text
+        if slot_style is not None:
+            _apply_slot_style(written, slot_style)
         _apply_style(written, run)
+
+
+def _apply_slot_style(written_run, style) -> None:
+    """Применить оформление слота: гарнитуру, кегль и цвет из шаблона."""
+    if style.font:
+        written_run.font.name = style.font
+    if style.size_pt:
+        written_run.font.size = Pt(style.size_pt)
+    if style.color:
+        written_run.font.color.rgb = RGBColor.from_string(style.color.lstrip("#"))
 
 
 def _apply_style(written_run, run: TextRun) -> None:

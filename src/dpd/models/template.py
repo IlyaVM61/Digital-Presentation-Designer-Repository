@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import Field
 
 from dpd.models.common import Bounds, Canvas, Contract
+from dpd.models.tokens import DesignTokens
 
 SlotKind = Literal["title", "body", "other"]
 
@@ -34,6 +35,27 @@ class TemplateSource(Contract):
     parser_version: str = "0.1.0"
 
 
+class TextStyle(Contract):
+    """Оформление текста, разрешённое по цепочке наследования.
+
+    `resolved_from` указывает уровень, на котором найден **кегль**, а
+    `font_resolved_from` — на котором найдена гарнитура. Нормативная схема
+    предусматривает одно поле, но свойства приходят с разных уровней: кегль
+    может быть задан явно в прогоне, а гарнитура унаследована от темы. Одно
+    общее значение пришлось бы округлять до менее достоверного, и отчёт стал
+    бы врать в безопасную сторону вместо того, чтобы говорить правду.
+
+    Значения, взятые с уровня `default`, характеризуют не шаблон, а редактор,
+    и в допустимый состав шаблона не попадают.
+    """
+
+    font: str | None = None
+    size_pt: float | None = None
+    color: str | None = None
+    resolved_from: str
+    font_resolved_from: str | None = None
+
+
 class Slot(Contract):
     """Место в макете, куда вёрстка кладёт содержимое.
 
@@ -50,6 +72,7 @@ class Slot(Contract):
     origin: SlotOrigin
     bounds: Bounds
     placeholder_idx: int | None = None
+    text_style: TextStyle | None = None
 
 
 class Layout(Contract):
@@ -75,4 +98,5 @@ class TemplateSchema(Contract):
     schema_version: str = "1.0"
     source: TemplateSource
     canvas: Canvas
+    design_tokens: DesignTokens | None = None
     layouts: list[Layout] = Field(min_length=1)

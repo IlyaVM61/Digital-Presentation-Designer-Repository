@@ -35,16 +35,21 @@ from dpd.models.template import (
     SlotOrigin,
     TemplateSchema,
     TemplateSource,
+    TextStyle,
 )
+from dpd.models.tokens import ColorToken, DesignTokens, FontToken, Token, TypeScale
 
 __all__ = [
     "BodyKind",
     "Bounds",
     "Canvas",
+    "ColorToken",
     "Contract",
+    "DesignTokens",
     "ElementKind",
     "Finding",
     "Fixability",
+    "FontToken",
     "Layout",
     "PresentationStructure",
     "RenderedElement",
@@ -60,4 +65,7 @@ __all__ = [
     "TemplateSchema",
     "TemplateSource",
     "TextRun",
+    "TextStyle",
+    "Token",
+    "TypeScale",
 ]

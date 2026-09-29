@@ -59,16 +59,17 @@ def test_result_is_a_valid_contract(name: str, _expected: int) -> None:
 
 @pytest.mark.parametrize(("name", "_expected"), TEMPLATES)
 def test_placeholder_slots_are_recognised(name: str, _expected: int) -> None:
-    """Хотя бы у одного макета должен найтись слот из плейсхолдера.
+    """Плейсхолдеры распознаются и остаются самым надёжным источником слотов.
 
-    Слабое требование намеренно: в двух шаблонах из трёх у большинства
-    макетов есть только плейсхолдер заголовка, а остальное размечено
-    обычными фигурами. Распознавание фигур — задача T-13.
+    Проверка «все слоты — плейсхолдеры» была верна для минимального парсера
+    и перестала быть верной с T-13: слоты выводятся ещё из фигур и из
+    свободных областей. Здесь остаётся то, что верно всегда.
     """
     schema = parse_template(requires(name))
     slots = [slot for layout in schema.layouts for slot in layout.slots]
     assert slots, "не найдено ни одного слота"
-    assert all(slot.origin == "placeholder" for slot in slots)
+    assert any(slot.origin == "placeholder" for slot in slots)
+    assert {slot.origin for slot in slots} <= {"placeholder", "shape", "derived"}
 
 
 @pytest.mark.parametrize(("name", "_expected"), TEMPLATES)
