@@ -36,18 +36,28 @@ def compose(
     structure: PresentationStructure,
     template: TemplateSchema,
     variant: str = DEFAULT_VARIANT,
+    size_shift: int = 0,
+    layout_offset: int = 0,
 ) -> RenderedPresentation:
     """Собрать колоду по замыслу и правилам шаблона."""
     return RenderedPresentation(
         variant=variant,
         template_hash=template.source.hash,
         canvas=template.canvas,
-        slides=[_compose_slide(slide, template) for slide in structure.slides],
+        slides=[
+            _compose_slide(slide, template, size_shift, layout_offset)
+            for slide in structure.slides
+        ],
     )
 
 
-def _compose_slide(slide: StructureSlide, template: TemplateSchema) -> Slide:
-    layout, decision = select(slide, template.layouts)
+def _compose_slide(
+    slide: StructureSlide,
+    template: TemplateSchema,
+    size_shift: int = 0,
+    layout_offset: int = 0,
+) -> Slide:
+    layout, decision = select(slide, template.layouts, layout_offset)
     elements: list[RenderedElement] = []
 
     tokens = template.design_tokens
@@ -57,7 +67,7 @@ def _compose_slide(slide: StructureSlide, template: TemplateSchema) -> Slide:
     title_slot = _first_slot(layout, "title")
     if title_slot is not None:
         element, applied = _text_element(
-            title_slot, [slide.headline], tokens, template.canvas, scale
+            title_slot, [slide.headline], tokens, template.canvas, scale, size_shift
         )
         elements.append(element)
         compensations.extend(applied)
@@ -65,7 +75,9 @@ def _compose_slide(slide: StructureSlide, template: TemplateSchema) -> Slide:
     body_items = slide.body.items if slide.body else []
     body_slot = _first_slot(layout, "body")
     if body_slot is not None and body_items:
-        element, applied = _text_element(body_slot, body_items, tokens, template.canvas, scale)
+        element, applied = _text_element(
+            body_slot, body_items, tokens, template.canvas, scale, size_shift
+        )
         elements.append(element)
         compensations.extend(applied)
 
@@ -82,7 +94,7 @@ def _first_slot(layout: Layout, kind: str) -> Slot | None:
     return next((slot for slot in layout.slots if slot.kind == kind), None)
 
 
-def _text_element(slot: Slot, paragraphs: list[str], tokens, canvas, scale):
+def _text_element(slot: Slot, paragraphs: list[str], tokens, canvas, scale, size_shift=0):
     """Уложить текст в слот.
 
     Геометрия берётся из слота без изменений: вёрстка не выдумывает
@@ -93,7 +105,7 @@ def _text_element(slot: Slot, paragraphs: list[str], tokens, canvas, scale):
     берётся из правил шаблона: стиль слота, разрешённый по цепочке
     наследования, с опорой на дизайн-токены там, где слот молчит.
     """
-    style = style_for(slot, tokens)
+    style = style_for(slot, tokens, size_shift)
     styled = slot.model_copy(update={"text_style": style})
     compensations, runs = plan_compensations(
         paragraphs, styled, canvas, scale or [style.size_pt]

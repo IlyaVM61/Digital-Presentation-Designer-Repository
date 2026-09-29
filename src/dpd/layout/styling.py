@@ -20,12 +20,19 @@ TITLE_SCALE_POSITION = 0.75
 """Доля шкалы снизу, откуда берётся кегль заголовка, если слот его не знает."""
 
 
-def style_for(slot: Slot, tokens: DesignTokens | None) -> TextStyle:
-    """Оформление для содержимого слота: из слота, с опорой на токены."""
+def style_for(slot: Slot, tokens: DesignTokens | None, size_shift: int = 0) -> TextStyle:
+    """Оформление для содержимого слота: из слота, с опорой на токены.
+
+    `size_shift` сдвигает кегль на ступени шкалы шаблона — так выражается
+    визуальный регистр варианта. Сдвиг идёт внутри шкалы: вариант не
+    выходит за правила шаблона, иначе аудит справедливо на него
+    пожаловался бы.
+    """
     base = slot.text_style
     font = _font_within_template(base.font if base else None, tokens)
     colour = base.color if base and base.color else _primary_colour(tokens)
     size = _snap_to_scale(base.size_pt if base else None, slot, tokens)
+    size = _shift_by_steps(size, tokens, size_shift)
 
     return TextStyle(
         font=font,
@@ -92,3 +99,17 @@ def _snap_to_scale(size: float | None, slot: Slot, tokens: DesignTokens | None) 
     # Слот не знает кегля: заголовку — крупный конец шкалы, тексту — средний.
     position = TITLE_SCALE_POSITION if slot.kind == "title" else 0.4
     return scale[min(int(len(scale) * position), len(scale) - 1)]
+
+
+def _shift_by_steps(size: float | None, tokens: DesignTokens | None, steps: int) -> float | None:
+    """Сдвинуть кегль на ступени вверх или вниз по шкале шаблона.
+
+    Ступень, а не проценты: шкала шаблона дискретна, и промежуточные
+    значения в ней не предусмотрены дизайнером. На краю шкалы сдвиг
+    упирается в границу — заголовок не станет мельче основного текста.
+    """
+    scale = tokens.type_scale.values if tokens else []
+    if size is None or not steps or size not in scale:
+        return size
+    index = scale.index(size)
+    return scale[min(max(index + steps, 0), len(scale) - 1)]

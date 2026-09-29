@@ -7,9 +7,18 @@
 Три варианта различаются по оси «визуальный регистр» (ADR-0004): макет,
 цветовая схема макета, подача данных, кегль.
 
-Реализована минимальная укладка (T-07): заголовок и текст в слоты макета.
+Реализованы укладка с применением токенов, выбор макета с деградацией,
+обработка переполнения и три варианта визуального регистра (T-07, T-20 …
+T-22, T-25). Профили вариантов — в `configs/variants.yaml`, вне кода.
 """
 
 from dpd.layout.composer import DEFAULT_VARIANT, compose
+from dpd.layout.variants import VariantProfile, compose_variants, load_profiles
 
-__all__ = ["DEFAULT_VARIANT", "compose"]
+__all__ = [
+    "DEFAULT_VARIANT",
+    "VariantProfile",
+    "compose",
+    "compose_variants",
+    "load_profiles",
+]

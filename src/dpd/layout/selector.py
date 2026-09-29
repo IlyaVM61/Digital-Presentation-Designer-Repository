@@ -54,14 +54,22 @@ def requested_family(slide: StructureSlide) -> LayoutFamily:
     return family
 
 
-def select(slide: StructureSlide, layouts: list[Layout]) -> tuple[Layout, LayoutDecision]:
-    """Выбрать макет и объяснить выбор."""
+def select(
+    slide: StructureSlide, layouts: list[Layout], offset: int = 0
+) -> tuple[Layout, LayoutDecision]:
+    """Выбрать макет и объяснить выбор.
+
+    `offset` выбирает не первый подходящий макет, а следующий за ним —
+    так три варианта получают разные макеты там, где шаблон предлагает
+    несколько равноценных. Смещение циклическое: если подходящих меньше,
+    берётся первый, а не пустота.
+    """
     wanted = requested_family(slide)
     needs_content = bool(slide.body and slide.body.items)
 
     exact = _ranked(layouts, wanted, needs_content)
     if exact:
-        chosen = exact[0]
+        chosen = exact[offset % len(exact)]
         return chosen, LayoutDecision(
             requested_family=wanted,
             chosen_family=chosen.family,
@@ -73,7 +81,7 @@ def select(slide: StructureSlide, layouts: list[Layout]) -> tuple[Layout, Layout
     for candidate in FALLBACK_ORDER.get(wanted, ()):
         available = _ranked(layouts, candidate, needs_content)
         if available:
-            chosen = available[0]
+            chosen = available[offset % len(available)]
             return chosen, LayoutDecision(
                 requested_family=wanted,
                 chosen_family=chosen.family,
@@ -110,9 +118,22 @@ def _ranked(layouts: list[Layout], family: LayoutFamily, needs_content: bool) ->
     candidates = [layout for layout in layouts if layout.family == family]
     if not needs_content:
         return candidates
+
     suitable = [layout for layout in candidates if _has_content_slot(layout)]
+    # Среди равных вперёд идут макеты с большим местом под содержимое.
+    # Без этого выбирался макет с крошечным слотом, текст ужимался до
+    # нечитаемых семи пунктов, и формально всё было по правилам шаблона.
+    suitable.sort(key=_content_area, reverse=True)
     return suitable + [layout for layout in candidates if layout not in suitable]
 
 
 def _has_content_slot(layout: Layout) -> bool:
     return any(slot.kind != "title" for slot in layout.slots)
+
+
+def _content_area(layout: Layout) -> float:
+    """Площадь самого просторного места под содержимое, в долях холста."""
+    areas = [
+        slot.bounds.w * slot.bounds.h for slot in layout.slots if slot.kind != "title"
+    ]
+    return max(areas, default=0.0)
