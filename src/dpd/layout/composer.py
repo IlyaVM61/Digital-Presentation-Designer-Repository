@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from dpd.layout.charts import build as build_chart
 from dpd.layout.overflow import plan_compensations
 from dpd.layout.selector import select
 from dpd.layout.styling import apply, style_for
@@ -79,6 +80,21 @@ def _compose_slide(
     body_slot = _first_slot(layout, "body")
 
     visual = slide.visualization
+    if body_slot is not None and visual is not None and visual.kind == "chart" and visual.chart:
+        style = style_for(body_slot, tokens, size_shift)
+        styled = body_slot.model_copy(update={"text_style": style})
+        chart = build_chart(visual.chart, styled, tokens)
+        elements.append(
+            _RE(slot_id=body_slot.id, kind="chart", bounds=body_slot.bounds, chart=chart)
+        )
+        return Slide(
+            id=slide.id,
+            layout_id=layout.id,
+            layout_decision=decision,
+            elements=elements,
+            applied_compensations=compensations,
+        )
+
     if body_slot is not None and visual is not None and visual.kind == "table" and visual.table:
         # Визуализация занимает место содержимого: таблица и текст в одном
         # слоте наложились бы друг на друга.

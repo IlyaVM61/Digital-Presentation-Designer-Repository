@@ -65,9 +65,10 @@ def select(
     берётся первый, а не пустота.
     """
     wanted = requested_family(slide)
-    needs_content = bool(slide.body and slide.body.items)
+    needs_visual = slide.visualization is not None
+    needs_content = bool(slide.body and slide.body.items) or needs_visual
 
-    exact = _ranked(layouts, wanted, needs_content)
+    exact = _ranked(layouts, wanted, needs_content, needs_visual)
     if exact:
         chosen = exact[offset % len(exact)]
         return chosen, LayoutDecision(
@@ -79,7 +80,7 @@ def select(
         )
 
     for candidate in FALLBACK_ORDER.get(wanted, ()):
-        available = _ranked(layouts, candidate, needs_content)
+        available = _ranked(layouts, candidate, needs_content, needs_visual)
         if available:
             chosen = available[offset % len(available)]
             return chosen, LayoutDecision(
@@ -105,7 +106,20 @@ def select(
     )
 
 
-def _ranked(layouts: list[Layout], family: LayoutFamily, needs_content: bool) -> list[Layout]:
+MIN_VISUAL_AREA = 0.12
+"""Доля холста, ниже которой визуализация не читается.
+
+Измерено: в слоте высотой 5,6% холста диаграмма схлопывалась до одной
+легенды — столбцов не оставалось вовсе. Таблице и диаграмме нужно место,
+которого абзацу текста хватило бы."""
+
+
+def _ranked(
+    layouts: list[Layout],
+    family: LayoutFamily,
+    needs_content: bool,
+    needs_visual: bool = False,
+) -> list[Layout]:
     """Макеты нужного типа, пригодные вперёд непригодных.
 
     Тип макета — не единственный критерий. Макет, помеченный контентным, но
@@ -120,6 +134,12 @@ def _ranked(layouts: list[Layout], family: LayoutFamily, needs_content: bool) ->
         return candidates
 
     suitable = [layout for layout in candidates if _has_content_slot(layout)]
+    if needs_visual:
+        # Визуализации нужно место: в тесном слоте диаграмма схлопывается до
+        # легенды, а таблица — до нечитаемой полоски. Макеты без простора
+        # отбрасываются, но только если есть из чего выбирать.
+        roomy = [layout for layout in suitable if _content_area(layout) >= MIN_VISUAL_AREA]
+        suitable = roomy or suitable
     # Среди равных вперёд идут макеты с большим местом под содержимое.
     # Без этого выбирался макет с крошечным слотом, текст ужимался до
     # нечитаемых семи пунктов, и формально всё было по правилам шаблона.

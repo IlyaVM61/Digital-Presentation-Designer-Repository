@@ -19,13 +19,17 @@ from dpd.models.rendered import (
     Compensation,
     ElementKind,
     LayoutDecision,
+    RenderedChart,
     RenderedElement,
     RenderedPresentation,
     RenderedTable,
     Slide,
 )
 from dpd.models.structure import (
+    AxisTitles,
     BodyKind,
+    ChartSeries,
+    ChartSpec,
     PresentationStructure,
     SlideBody,
     StructureMeta,
@@ -52,11 +56,14 @@ from dpd.models.template import (
 from dpd.models.tokens import ColorToken, DesignTokens, FontToken, Token, TypeScale
 
 __all__ = [
+    "AxisTitles",
     "Background",
     "BackgroundKind",
     "BodyKind",
     "Bounds",
     "Canvas",
+    "ChartSeries",
+    "ChartSpec",
     "ColorScheme",
     "ColorToken",
     "Compensation",
@@ -72,6 +79,7 @@ __all__ = [
     "MarkupQuality",
     "ParsingStrategy",
     "PresentationStructure",
+    "RenderedChart",
     "RenderedElement",
     "RenderedPresentation",
     "RenderedTable",

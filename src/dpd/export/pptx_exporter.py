@@ -23,7 +23,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from pptx import Presentation
+from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
+from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
 from pptx.util import Emu, Pt
 
 from dpd.models import (
@@ -97,6 +99,11 @@ def _fill_slide(pptx_slide, elements: list[RenderedElement], slots: dict[str, Sl
     used: set[int] = set()
     for element in elements:
         slot = slots.get(element.slot_id)
+        if element.kind == "chart" and element.chart is not None:
+            _write_chart(pptx_slide, element, canvas)
+            if slot and slot.placeholder_idx is not None:
+                used.add(slot.placeholder_idx)
+            continue
         if element.kind == "table" and element.table is not None:
             _write_table(pptx_slide, element, canvas)
             if slot and slot.placeholder_idx is not None:
@@ -125,6 +132,89 @@ def _new_textbox(pptx_slide, element: RenderedElement, canvas: Canvas):
         Emu(round(element.bounds.w * canvas.width_emu)),
         Emu(round(element.bounds.h * canvas.height_emu)),
     )
+
+
+CHART_TYPES = {
+    "column": XL_CHART_TYPE.COLUMN_CLUSTERED,
+    "bar": XL_CHART_TYPE.BAR_CLUSTERED,
+    "line": XL_CHART_TYPE.LINE_MARKERS,
+    "pie": XL_CHART_TYPE.PIE,
+}
+
+
+def _write_chart(pptx_slide, element, canvas: Canvas) -> None:
+    """Вставить нативную диаграмму PowerPoint.
+
+    Именно нативную: диаграмма, вставленная картинкой, не редактируется и
+    не пересчитывается при правке данных, а ТЗ требует редактируемых
+    объектов.
+    """
+    spec = element.chart
+    data = CategoryChartData()
+    data.categories = spec.categories
+    for series in spec.series:
+        data.add_series(series.name, series.points)
+
+    frame = pptx_slide.shapes.add_chart(
+        CHART_TYPES.get(spec.chart_type, XL_CHART_TYPE.COLUMN_CLUSTERED),
+        Emu(round(element.bounds.x * canvas.width_emu)),
+        Emu(round(element.bounds.y * canvas.height_emu)),
+        Emu(round(element.bounds.w * canvas.width_emu)),
+        Emu(round(element.bounds.h * canvas.height_emu)),
+        data,
+    )
+    chart = frame.chart
+
+    chart.has_legend = spec.has_legend
+    if spec.has_legend:
+        chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+        chart.legend.include_in_layout = False
+
+    _colour_series(chart, spec)
+    _title_axes(chart, spec)
+
+    if spec.font or spec.size_pt:
+        text = chart.font
+        if spec.font:
+            text.name = spec.font
+        if spec.size_pt:
+            text.size = Pt(spec.size_pt)
+
+
+def _colour_series(chart, spec) -> None:
+    """Окрасить ряды цветами палитры шаблона.
+
+    У круговой диаграммы ряд один, а цветом различаются точки — поэтому
+    палитра раскладывается по ним, а не по рядам.
+    """
+    if not spec.colors:
+        return
+
+    if spec.chart_type == "pie" and chart.series:
+        points = list(chart.series[0].points)
+        for index, point in enumerate(points):
+            point.format.fill.solid()
+            point.format.fill.fore_color.rgb = RGBColor.from_string(
+                spec.colors[index % len(spec.colors)].lstrip("#")
+            )
+        return
+
+    for index, series in enumerate(chart.series):
+        colour = spec.colors[index % len(spec.colors)]
+        series.format.fill.solid()
+        series.format.fill.fore_color.rgb = RGBColor.from_string(colour.lstrip("#"))
+
+
+def _title_axes(chart, spec) -> None:
+    """Подписать оси. У круговой диаграммы осей нет — подписи пропускаются."""
+    if spec.chart_type == "pie":
+        return
+    if spec.axis_titles.category:
+        chart.category_axis.has_title = True
+        chart.category_axis.axis_title.text_frame.text = spec.axis_titles.category
+    if spec.axis_titles.value:
+        chart.value_axis.has_title = True
+        chart.value_axis.axis_title.text_frame.text = spec.axis_titles.value
 
 
 def _write_table(pptx_slide, element, canvas: Canvas) -> None:

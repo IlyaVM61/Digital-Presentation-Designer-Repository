@@ -48,6 +48,38 @@ class TableSpec(Contract):
     rows: list[list[str]] = Field(default_factory=list)
 
 
+class ChartSeries(Contract):
+    """Ряд данных диаграммы."""
+
+    name: str
+    points: list[float] = Field(default_factory=list)
+
+
+class AxisTitles(Contract):
+    """Подписи осей.
+
+    Обязательны по проверке `integrity.chart_no_labels`: диаграмма без
+    единиц измерения не сообщает ничего. Правило наше — эталона в
+    шаблонах нет, там нет ни одной диаграммы.
+    """
+
+    category: str | None = None
+    value: str | None = None
+
+
+class ChartSpec(Contract):
+    """Данные диаграммы и выбранный тип.
+
+    Тип выбирает модель — это вопрос смысла: динамика во времени просит
+    линию, доли целого — круг. Оформление синтезирует вёрстка.
+    """
+
+    chart_type: Literal["column", "bar", "line", "pie"] = "column"
+    categories: list[str] = Field(default_factory=list)
+    series: list[ChartSeries] = Field(default_factory=list)
+    axis_titles: AxisTitles = Field(default_factory=AxisTitles)
+
+
 class Visualization(Contract):
     """Чем показать содержимое слайда.
 
@@ -59,6 +91,7 @@ class Visualization(Contract):
 
     kind: Literal["table", "chart"]
     table: TableSpec | None = None
+    chart: ChartSpec | None = None
 
 
 class StructureSlide(Contract):

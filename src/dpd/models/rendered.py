@@ -13,9 +13,10 @@ from typing import Literal
 from pydantic import Field
 
 from dpd.models.common import Bounds, Canvas, Contract, TextRun
+from dpd.models.structure import AxisTitles, ChartSeries
 from dpd.models.template import LayoutFamily
 
-ElementKind = Literal["text", "table"]
+ElementKind = Literal["text", "table", "chart"]
 
 
 class RenderedTable(Contract):
@@ -29,6 +30,23 @@ class RenderedTable(Contract):
     body_color: str | None = None
 
 
+class RenderedChart(Contract):
+    """Диаграмма с оформлением, синтезированным из токенов шаблона.
+
+    Цвета рядов берутся из палитры: диаграмма в чужих цветах выдаёт, что
+    слайд собран не по шаблону, даже если всё остальное безупречно.
+    """
+
+    chart_type: str = "column"
+    categories: list[str] = Field(default_factory=list)
+    series: list[ChartSeries] = Field(default_factory=list)
+    colors: list[str] = Field(default_factory=list)
+    axis_titles: AxisTitles = Field(default_factory=AxisTitles)
+    has_legend: bool = False
+    font: str | None = None
+    size_pt: float | None = None
+
+
 class RenderedElement(Contract):
     """Содержимое, уложенное в слот, с окончательной геометрией в долях."""
 
@@ -37,6 +55,7 @@ class RenderedElement(Contract):
     bounds: Bounds
     runs: list[TextRun] = Field(default_factory=list)
     table: RenderedTable | None = None
+    chart: RenderedChart | None = None
 
 
 class LayoutDecision(Contract):
