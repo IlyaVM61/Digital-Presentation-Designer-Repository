@@ -24,31 +24,39 @@
 
 - Десктопная платформа: Windows или macOS
 - Браузер: актуальная и предыдущая версии Chrome, Firefox, Safari, Яндекс Браузер
-- Python 3.12+ (парсинг и экспорт PPTX)
-- GPU для локального инференса либо доступ к внешнему API-провайдеру открытых моделей
+- Python 3.12+
+- **LibreOffice** — обязателен: конвертация в PDF и рендер слайдов в изображения
+- Доступ к внешнему API-провайдеру открытых моделей либо GPU для локального инференса. Для модели на 32B нужно около 20 ГБ VRAM в 4-битном квантовании; на машине разработки такого GPU нет, поэтому используется внешний провайдер
+
+### Размещение
+
+Тяжёлые компоненты выносятся на диск с запасом места: виртуальное окружение занимает около 420 МБ, LibreOffice — около 350 МБ, а каждый прогон порождает рендеры слайдов и три варианта колоды в трёх форматах. Каталог результатов задаётся переменной `DPD_OUTPUT_DIR`.
 
 Поддержка мобильных устройств и планшетов не требуется и не планируется.
 
 ## Быстрый старт
 
-`ДОПУЩЕНИЕ` Стек бэкенда окончательно не утверждён (Python или TypeScript), команды ниже будут зафиксированы на фазе архитектуры проекта.
+Стек: Python 3.12 и Streamlit (решение ADR-0005). Продуктового кода пока нет — команды ниже описывают целевой сценарий запуска.
 
 ```bash
-# Установка зависимостей
-pip install -r scripts/requirements.txt
+# Окружение (на диске с достаточным местом — см. «Размещение»)
+python -m venv D:\venvs\dpd
+D:\venvs\dpd\Scripts\python -m pip install -r scripts/requirements.txt
 
-# Настройка переменных окружения
+# Переменные окружения
 cp .env.example .env
 # заполнить .env — см. раздел ниже
 
-# Запуск полного пайплайна
-python main.py --template ./assets/templates/calibration/template.pptx \
-               --content ./assets/content-pack/content.md \
-               --variants 3 \
-               --out ./out/
+# Веб-интерфейс
+D:\venvs\dpd\Scripts\streamlit run ui/app.py
 
-# Запуск тестов
-pytest
+# Пакетная генерация девяти демонстрационных колод
+D:\venvs\dpd\Scripts\python scripts/generate_all.py \
+    --templates ./assets/templates/calibration \
+    --content ./assets/content-pack
+
+# Тесты
+D:\venvs\dpd\Scripts\pytest
 ```
 
 ## Переменные окружения
@@ -65,7 +73,8 @@ pytest
 | `VLM_MODEL` | Идентификатор VLM | `Qwen/Qwen2.5-VL-7B-Instruct` |
 | `T2I_ENABLED` | Включить генерацию изображений (задача со звёздочкой) | `false` |
 | `T2I_MODEL` | Модель text-to-image | `black-forest-labs/FLUX.1-schnell` |
-| `SOFFICE_PATH` | Путь к LibreOffice для рендера PDF и превью | автоопределение |
+| `SOFFICE_PATH` | Путь к LibreOffice для рендера и PDF | `D:\LibreOffice\program\soffice.com` |
+| `DPD_OUTPUT_DIR` | Каталог результатов генерации и промежуточных артефактов | `D:\dpd-out` |
 | `PIPELINE_TIMEOUT_SEC` | Лимит времени на колоду (ТЗ: не более 5 минут) | `300` |
 | `PROMPTS_VERSION` | Версия набора промптов для воспроизводимости | `v1` |
 | `LOG_LEVEL` | Уровень логирования | `INFO` |
