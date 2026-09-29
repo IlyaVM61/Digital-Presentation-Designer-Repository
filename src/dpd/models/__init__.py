@@ -16,6 +16,7 @@
 from dpd.models.audit import Finding, Fixability, Severity
 from dpd.models.common import Bounds, Canvas, Contract, TextRun
 from dpd.models.rendered import (
+    Compensation,
     ElementKind,
     LayoutDecision,
     RenderedElement,
@@ -55,6 +56,7 @@ __all__ = [
     "Canvas",
     "ColorScheme",
     "ColorToken",
+    "Compensation",
     "Contract",
     "DesignTokens",
     "ElementKind",

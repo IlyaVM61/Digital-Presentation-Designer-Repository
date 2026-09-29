@@ -14,9 +14,11 @@
 
 from __future__ import annotations
 
+from dpd.layout.overflow import plan_compensations
 from dpd.layout.selector import select
 from dpd.layout.styling import apply, style_for
 from dpd.models import (
+    Compensation,
     Layout,
     PresentationStructure,
     RenderedElement,
@@ -49,21 +51,30 @@ def _compose_slide(slide: StructureSlide, template: TemplateSchema) -> Slide:
     elements: list[RenderedElement] = []
 
     tokens = template.design_tokens
+    scale = tokens.type_scale.values if tokens else []
+    compensations: list[Compensation] = []
 
     title_slot = _first_slot(layout, "title")
     if title_slot is not None:
-        elements.append(_text_element(title_slot, [slide.headline], tokens))
+        element, applied = _text_element(
+            title_slot, [slide.headline], tokens, template.canvas, scale
+        )
+        elements.append(element)
+        compensations.extend(applied)
 
     body_items = slide.body.items if slide.body else []
     body_slot = _first_slot(layout, "body")
     if body_slot is not None and body_items:
-        elements.append(_text_element(body_slot, body_items, tokens))
+        element, applied = _text_element(body_slot, body_items, tokens, template.canvas, scale)
+        elements.append(element)
+        compensations.extend(applied)
 
     return Slide(
         id=slide.id,
         layout_id=layout.id,
         layout_decision=decision,
         elements=elements,
+        applied_compensations=compensations,
     )
 
 
@@ -71,7 +82,7 @@ def _first_slot(layout: Layout, kind: str) -> Slot | None:
     return next((slot for slot in layout.slots if slot.kind == kind), None)
 
 
-def _text_element(slot: Slot, paragraphs: list[str], tokens=None) -> RenderedElement:
+def _text_element(slot: Slot, paragraphs: list[str], tokens, canvas, scale):
     """Уложить текст в слот.
 
     Геометрия берётся из слота без изменений: вёрстка не выдумывает
@@ -83,9 +94,13 @@ def _text_element(slot: Slot, paragraphs: list[str], tokens=None) -> RenderedEle
     наследования, с опорой на дизайн-токены там, где слот молчит.
     """
     style = style_for(slot, tokens)
-    return RenderedElement(
-        slot_id=slot.id,
-        kind="text",
-        bounds=slot.bounds,
-        runs=[apply(style, paragraph) for paragraph in paragraphs],
+    styled = slot.model_copy(update={"text_style": style})
+    compensations, runs = plan_compensations(
+        paragraphs, styled, canvas, scale or [style.size_pt]
+    )
+    if not runs:
+        runs = [apply(style, paragraph) for paragraph in paragraphs]
+    return (
+        RenderedElement(slot_id=slot.id, kind="text", bounds=slot.bounds, runs=runs),
+        compensations,
     )

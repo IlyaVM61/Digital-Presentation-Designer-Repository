@@ -42,6 +42,21 @@ class LayoutDecision(Contract):
     reason: str = ""
 
 
+class Compensation(Contract):
+    """Отклонение от замысла, понадобившееся, чтобы содержимое поместилось.
+
+    Поле обязательно по требованию FR-18: пользователь должен узнать, что
+    его замысел изменён. Молчаливое уменьшение кегля — то самое поведение,
+    за которое к презентациям возникают претензии.
+    """
+
+    kind: Literal["fontScale", "truncate"]
+    slot_id: str
+    from_value: float | None = None
+    to_value: float | None = None
+    reason: str = ""
+
+
 class Slide(Contract):
     """Слайд, собранный на макете шаблона."""
 
@@ -49,6 +64,7 @@ class Slide(Contract):
     layout_id: str
     layout_decision: LayoutDecision | None = None
     elements: list[RenderedElement] = Field(default_factory=list)
+    applied_compensations: list[Compensation] = Field(default_factory=list)
 
 
 class RenderedPresentation(Contract):
