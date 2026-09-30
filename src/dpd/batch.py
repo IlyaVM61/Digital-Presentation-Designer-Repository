@@ -142,6 +142,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--formats", type=_formats, default=FORMATS, help="через запятую; по умолчанию все три")
     args = parser.parse_args(argv)
 
+    # Вывод в канал Windows кодирует в cp1251: кириллица приходит в журнал
+    # кракозябрами, а символ вне кодировки ронял команду уже после того, как
+    # все колоды собраны. Терминал Python и так пишет в Юникоде.
+    if not sys.stdout.isatty():
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     if not args.outline.is_file():
         parser.error(f"план колоды не найден: {args.outline}")
     structure = structure_from_outline(args.outline.read_text(encoding="utf-8"))

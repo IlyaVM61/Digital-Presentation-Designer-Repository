@@ -13,9 +13,11 @@ LibreOffice — 16 с на шаблон, а имена от формата не 
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -160,6 +162,28 @@ def test_broken_template_does_not_stop_the_others(outline: Path) -> None:
     # собраны: девять колод не должны зависеть от самого слабого файла.
     assert code != 0
     assert sorted(path.stem for path in (out / "decks").iterdir()) == ["vk-tech__a", "vk-tech__b", "vk-tech__c"]
+
+
+def test_console_encoding_cannot_fail_the_batch(outline: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    matrix = dict(load_matrix())
+    if not matrix["vk-tech"].exists():
+        pytest.skip("нет калибровочного шаблона VK Tech")
+    config = _base() / "one.yaml"
+    config.write_text(
+        f"version: 1\ntemplates:\n  - slug: vk-tech\n    file: {matrix['vk-tech'].as_posix()}\n",
+        encoding="utf-8",
+    )
+    # Найдено живым прогоном: вывод в канал на Windows идёт в cp1251, и
+    # символ вне её ронял команду уже после того, как все колоды собраны.
+    # Сводка в канале — это журнал, его читают как UTF-8.
+    raw = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="cp1251"))
+
+    code = main(["--outline", str(outline), "--out", str(_fresh("encoding")), "--matrix", str(config), "--formats", "html"])
+
+    sys.stdout.flush()
+    assert code == 0
+    assert "Итого" in raw.getvalue().decode("utf-8")
 
 
 def test_unknown_format_is_refused(outline: Path, tmp_path: Path) -> None:
