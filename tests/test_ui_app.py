@@ -186,3 +186,92 @@ def test_empty_plan_is_refused_with_an_explanation(app: AppTest) -> None:
 
     assert not app.exception
     assert app.warning or app.error, "интерфейс не объяснил, чего не хватает"
+
+
+# --- T-39: три варианта рядом и выбор -------------------------------------
+#
+# Критерий приёмки: различие видно без пояснений. Значит, варианты стоят
+# рядом — строка на слайд, колонка на вариант, — а не за переключателем, и
+# выбирает пользователь после того, как посмотрел, а не до прогона.
+
+
+def build(app: AppTest, *, formats: tuple[str, ...], previews: bool) -> AppTest:
+    """Собрать колоду с нужными галочками."""
+    upload(app, template_file())
+    app.text_area[0].set_value(OUTLINE)
+    for checkbox in app.checkbox:
+        if checkbox.label.startswith("Превью"):
+            checkbox.set_value(previews)
+        else:
+            checkbox.set_value(any(fmt in checkbox.label.lower() for fmt in formats))
+    return app.button[0].click().run()
+
+
+def test_three_variants_are_shown_side_by_side(app: AppTest) -> None:
+    from dpd.layout.variants import load_profiles
+    from dpd.render import soffice_path
+
+    if soffice_path() is None:
+        pytest.skip("LibreOffice не найден")
+
+    build(app, formats=("pptx",), previews=True)
+
+    assert not app.exception, app.exception
+    result = app.session_state["result"]
+    картинки = [url for node in app.get("image") for url in node.value]
+    assert len(картинки) == 3 * len(result.chosen.slides), "не каждый слайд показан в трёх вариантах"
+
+    текст = " ".join(item.value for item in app.markdown)
+    for profile in load_profiles():
+        assert profile.name in текст, f"вариант «{profile.name}» не подписан"
+
+
+def test_previews_are_on_by_default_when_libreoffice_is_there(app: AppTest) -> None:
+    """Сравнение глазами — основной путь сценария, а не опция для знающих."""
+    from dpd.render import soffice_path
+
+    app.run()
+    превью = next(box for box in app.checkbox if box.label.startswith("Превью"))
+
+    assert превью.value is (soffice_path() is not None)
+
+
+def test_choosing_a_variant_switches_the_files(app: AppTest) -> None:
+    """Выбор после прогона ничего не пересобирает: файлы всех трёх готовы."""
+    build(app, formats=("pptx", "html"), previews=False)
+
+    assert not app.exception, app.exception
+    assert app.radio, "выбрать вариант нечем"
+    выбор = app.radio[0]
+    assert len(выбор.options) == 3
+
+    выбор.set_value("C").run()
+
+    assert not app.exception, app.exception
+    имена = [button.label for button in app.download_button]
+    assert len(имена) == 2
+    assert all("-C." in name for name in имена), f"предложены файлы не того варианта: {имена}"
+
+
+def test_identical_variants_are_reported_on_the_page(
+    app: AppTest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Три одинаковые колонки без объяснения — худшее, что можно показать."""
+    import yaml
+
+    same = {"prefer_scheme": "any", "prefer_families": ["content"], "size_shift": 0}
+    config = tmp_path / "variants.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {"profiles": [{"id": key, "name": f"Вариант {key}", **same} for key in "ABC"]},
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DPD_VARIANTS_CONFIG", str(config))
+
+    build(app, formats=("html",), previews=False)
+
+    assert not app.exception, app.exception
+    предупреждения = " ".join(item.value for item in app.warning)
+    assert "вариант" in предупреждения.lower(), "совпадение вариантов не показано"

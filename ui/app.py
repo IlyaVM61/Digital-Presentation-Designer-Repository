@@ -16,6 +16,10 @@ Streamlit выбран решением D6 (ADR-0005): сценарий мног
 **План колоды пока вводится руками.** Слой генерации по брифу — задача T-49;
 до неё структуру приносит пользователь, и подменять это правдоподобной
 заглушкой нельзя: пользователь решил бы, что модель уже работает.
+
+**Варианты выбираются после того, как их увидели** (T-39). Три варианта
+стоят рядом, строка на слайд, а файлы всех трёх готовы с прогона: выбор
+переключает кнопки скачивания и ничего не пересобирает.
 """
 
 from __future__ import annotations
@@ -28,7 +32,9 @@ from pathlib import Path
 import streamlit as st
 
 from dpd.generation import structure_from_outline
-from dpd.orchestrator import STAGE_TITLES, run_pipeline
+from dpd.models import AuditReport
+from dpd.orchestrator import STAGE_TITLES, RunResult, run_pipeline
+from dpd.render import soffice_path
 
 FORMATS = [("pptx", "PowerPoint (.pptx)"), ("pdf", "PDF (.pdf)"), ("html", "HTML (.html)")]
 MIME = {
@@ -82,6 +88,38 @@ def diagnose(template_bytes: bytes, name: str) -> dict[str, object]:
         "strategy": schema.markup_quality.strategy,
         "quality": schema.markup_quality.score,
     }
+
+
+def fixed(report: AuditReport) -> int:
+    """Сколько находок система исправила сама."""
+    return len([item for item in report.findings if item.status == "autofixed"])
+
+
+def show_side_by_side(result: RunResult) -> None:
+    """Показать варианты рядом: строка на слайд, колонка на вариант (T-39).
+
+    Критерий приёмки — различие видно без пояснений. Поэтому один и тот же
+    слайд трёх вариантов стоит в одной строке, а не за переключателем:
+    сравнение по памяти различия не показывает, а только утверждает.
+    """
+    if not result.variant_previews:
+        st.info(
+            "Превью выключено: сравнить варианты можно по скачанным файлам. "
+            "Включите «Превью слайдов», чтобы увидеть их рядом."
+        )
+        return
+
+    шапка = st.columns(len(result.variants))
+    for column, deck in zip(шапка, result.variants, strict=True):
+        column.markdown(f"**{result.variant_names.get(deck.variant, deck.variant)}**")
+
+    слайдов = max(len(images) for images in result.variant_previews.values())
+    for index in range(слайдов):
+        ряд = st.columns(len(result.variants))
+        for column, deck in zip(ряд, result.variants, strict=True):
+            images = result.variant_previews.get(deck.variant, [])
+            if index < len(images):
+                column.image(str(images[index]), width="stretch")
 
 
 st.set_page_config(page_title="Цифровой дизайнер презентаций", layout="wide")
@@ -139,7 +177,13 @@ chosen_formats = [
     if column.checkbox(label, value=key == "pptx")
 ]
 with columns[-1]:
-    previews = st.checkbox("Превью слайдов", value=False, help="Требует LibreOffice, добавляет 13–28 с")
+    # Сравнение вариантов глазами — основной путь сценария (PRD, шаг 5), а не
+    # опция для знающих. Выключено оно только там, где LibreOffice нет.
+    previews = st.checkbox(
+        "Превью слайдов",
+        value=soffice_path() is not None,
+        help="Показывает три варианта рядом. Требует LibreOffice, добавляет около 20 с",
+    )
 
 if st.button("Собрать колоду", type="primary"):
     if uploaded is None or report is None:
@@ -194,37 +238,57 @@ if result is not None:
     )
 
     находки = sum(len(report_.findings) for report_ in result.reports.values())
-    исправлено = sum(
-        len([item for item in report_.findings if item.status == "autofixed"])
-        for report_ in result.reports.values()
-    )
+    исправлено = sum(fixed(report_) for report_ in result.reports.values())
     st.markdown(
         f"**Аудит:** собрано вариантов {len(result.variants)}, "
-        f"находок {находки}, из них исправлено автоматически {исправлено}. "
-        f"Выгружен вариант {result.chosen.variant}."
+        f"находок {находки}, из них исправлено автоматически {исправлено}."
     )
 
-    if result.chosen.decisions:
+    if result.distinction:
+        # Три одинаковые колонки без объяснения — худшее, что можно показать:
+        # пользователь решит, что система сломалась, или не заметит подмены.
+        st.warning(
+            "Варианты получились похожими: в шаблоне не нашлось, чем их различить. "
+            + " ".join(finding.message for finding in result.distinction)
+        )
+
+    st.subheader("Три варианта")
+    show_side_by_side(result)
+
+    варианты = [deck.variant for deck in result.variants]
+    выбран = st.radio(
+        "Какой вариант берёте",
+        options=варианты,
+        index=варианты.index(result.chosen.variant),
+        format_func=lambda key: result.variant_names.get(key, key),
+        captions=[
+            f"находок {len(result.reports[key].findings)}, "
+            f"исправлено автоматически {fixed(result.reports[key])}"
+            for key in варианты
+        ],
+        horizontal=True,
+        key="variant",
+    )
+    колода = next(deck for deck in result.variants if deck.variant == выбран)
+
+    if колода.decisions:
         # Система не вправе молча менять оформление: она называет, что
         # выбрала и что объявляет сам шаблон. Подробности свёрнуты — человек
         # пришёл делать презентацию, а не разбираться в наследовании стилей.
-        with st.expander(f"Система приняла решений за вас: {len(result.chosen.decisions)}"):
-            for decision in result.chosen.decisions:
+        with st.expander(f"Система приняла решений за вас: {len(колода.decisions)}"):
+            for decision in колода.decisions:
                 st.markdown(f"- {decision.reason} (в шаблоне объявлено: {decision.declared})")
             st.caption(
                 "Переключить правило можно в configs/layout.yaml: "
                 "`conflict_rule: template` заставит следовать объявлению шаблона."
             )
 
-    for key, path in result.exports.items():
+    # Файлы всех трёх вариантов готовы с прогона: выбор переключает кнопки,
+    # а не запускает сборку заново.
+    for key, path in result.variant_exports.get(выбран, {}).items():
         st.download_button(
             f"Скачать {key.upper()} — {path.name}",
             data=path.read_bytes(),
             file_name=path.name,
             mime=MIME.get(key, "application/octet-stream"),
         )
-
-    if result.previews:
-        st.subheader("Превью слайдов")
-        for image in result.previews:
-            st.image(str(image))
