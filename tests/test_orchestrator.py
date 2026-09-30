@@ -271,3 +271,71 @@ def test_distinct_variants_raise_no_alarm(template: Path, out_dir: Path) -> None
     result = run_pipeline(template, structure_from_outline(OUTLINE), out_dir / "distinct", formats=("html",))
 
     assert result.distinction == []
+
+
+# --- T-40: работа с находками ------------------------------------------------
+#
+# Выбор исправления стоит одного шага, а не второго прогона: пользователь уже
+# смотрит на варианты, и пересобирать все три ради одного слайда незачем.
+# Но файлы выбранного варианта обязаны измениться — исправление, которого нет
+# в скачанном файле, пользователю ничего не дало.
+
+CROWDED = """Итоги пилота
+Что изменилось за квартал
+- Срок сборки колоды сократился с девяти дней до трёх
+- Правки текста переживают сохранение файла
+Что умеет система
+- Разбор шаблона занимает меньше секунды
+- Три варианта собираются одним нажатием
+- Правки текста переживают сохранение
+- Таблицы остаются таблицами
+- Диаграммы остаются диаграммами
+- Проверка оформления идёт до выгрузки
+- Механические дефекты исправляются сами
+- Файлы готовы в трёх форматах
+"""
+
+
+def test_finding_fix_reaudit_cycle_goes_through(template: Path, out_dir: Path) -> None:
+    """Критерий приёмки T-40: находка → исправление → повторный аудит → файлы."""
+    from pptx import Presentation
+
+    from dpd.orchestrator import revise
+
+    result = run_pipeline(template, structure_from_outline(CROWDED), out_dir / "revise", formats=("pptx", "html"))
+    variant = result.variants[0].variant
+    report = result.reports[variant]
+    index = next(i for i, f in enumerate(report.findings) if f.check_id == "density.too_many_bullets")
+    assert [item.id for item in result.remedies[variant][index]] == ["split"]
+    slides = len(Presentation(result.variant_exports[variant]["pptx"]).slides)
+    autofixed = [f for f in report.findings if f.status == "autofixed"]
+    untouched = {key: value for key, value in result.reports.items() if key != variant}
+
+    revised = revise(result, variant, {index: "split"})
+
+    after = revised.reports[variant]
+    assert "density.too_many_bullets" not in {f.check_id for f in after.findings}
+    assert len(Presentation(revised.variant_exports[variant]["pptx"]).slides) == slides + 1
+    html = revised.variant_exports[variant]["html"].read_text(encoding="utf-8")
+    assert html.count('<section class="slide"') == slides + 1
+    assert "Файлы готовы в трёх форматах" in html
+    assert [item.remedy.id for item in revised.revision.applied] == ["split"]
+    assert revised.revision.after < revised.revision.before
+    assert [f for f in after.findings if f.status == "autofixed"][: len(autofixed)] == autofixed, (
+        "автоисправления первого прогона пропали из отчёта"
+    )
+    assert {key: revised.reports[key] for key in untouched} == untouched, "задеты другие варианты"
+    assert revised.chosen.variant == result.chosen.variant
+    assert len(revised.chosen.slides) == slides + 1
+
+
+def test_revision_without_choices_changes_nothing(template: Path, out_dir: Path) -> None:
+    from dpd.orchestrator import revise
+
+    result = run_pipeline(template, structure_from_outline(CROWDED), out_dir / "keep", formats=("html",))
+    variant = result.variants[1].variant
+
+    revised = revise(result, variant, {})
+
+    assert revised.reports[variant] == result.reports[variant]
+    assert not revised.revision.applied

@@ -167,6 +167,7 @@ CHART_NO_LABELS = CheckSpec(
     fixability="mechanical",
     sublayer="4b",
     title="У диаграммы нет подписей осей или легенды",
+    plain="У диаграммы не хватает подписей",
 )
 
 DUPLICATE_SLIDES = CheckSpec(

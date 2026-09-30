@@ -99,6 +99,7 @@ GUIDE_MISALIGN = CheckSpec(
     fixability="mechanical",
     sublayer="4b",
     title="Блоки не выровнены по направляющим макета",
+    plain="Блоки стоят неровно",
 )
 
 MARGIN_VIOLATION = CheckSpec(

@@ -27,7 +27,11 @@
 
 from __future__ import annotations
 
+from math import ceil
+
+from dpd.audit.fixer import slide_of
 from dpd.audit.registry import CheckSpec, check, param
+from dpd.audit.remedies import remedy
 from dpd.layout.overflow import (
     AVERAGE_GLYPH_WIDTH,
     EMU_PER_INCH,
@@ -54,6 +58,7 @@ TOO_MANY_BULLETS = CheckSpec(
     fixability="lossy",
     sublayer="4b",
     title="Больше шести буллетов на слайде",
+    plain="Слишком много пунктов на слайде",
 )
 
 BULLET_TOO_LONG = CheckSpec(
@@ -64,6 +69,7 @@ BULLET_TOO_LONG = CheckSpec(
     fixability="lossy",
     sublayer="4b",
     title="Буллет длиннее пятнадцати слов",
+    plain="Слишком длинный пункт списка",
 )
 
 TABLE_TOO_BIG = CheckSpec(
@@ -74,6 +80,7 @@ TABLE_TOO_BIG = CheckSpec(
     fixability="lossy",
     sublayer="4b",
     title="Таблица больше семи строк или пяти колонок",
+    plain="Таблица слишком большая для слайда",
 )
 
 TOO_MANY_SERIES = CheckSpec(
@@ -84,6 +91,7 @@ TOO_MANY_SERIES = CheckSpec(
     fixability="lossy",
     sublayer="4b",
     title="Больше пяти рядов на диаграмме",
+    plain="На диаграмме слишком много рядов данных",
 )
 
 FILL_OUT_OF_RANGE = CheckSpec(
@@ -295,6 +303,69 @@ def check_fill_out_of_range(
             )
         )
     return findings
+
+
+# --- Исправления с потерями (T-40) ------------------------------------------
+
+
+@remedy(
+    TOO_MANY_BULLETS,
+    FILL_OUT_OF_RANGE,
+    id="split",
+    title="Перенести часть пунктов на новый слайд",
+    consequence="Слайдов станет больше, заголовок повторится на новом слайде",
+)
+def split_points(deck: RenderedPresentation, finding: Finding, template: TemplateSchema | None) -> bool:
+    """Разделить список поровну между слайдом и его продолжением.
+
+    Частей столько, чтобы в каждой уложиться в норму проверки, если она
+    известна, иначе две. Продолжение собирается на том же макете и несёт
+    только заголовок и перенесённые пункты: таблица или диаграмма, скопированная
+    на второй слайд, была бы дублем, а не продолжением.
+
+    Текст не меняется ни в одном пункте, порядок сохраняется. Ничего не
+    выдумывается: продолжение повторяет заголовок, а не получает новый.
+    """
+    slide = slide_of(deck, finding)
+    if slide is None or template is None:
+        return False
+    titles = _title_slots(template)
+    body = _body_text(slide, titles)
+    if not body:
+        return False
+    main = max(body, key=lambda element: len(element.runs))
+    limit = finding.evidence.get("expected")
+    parts = ceil(len(main.runs) / limit) if isinstance(limit, int) and limit > 0 else 2
+    parts = min(max(parts, 2), len(main.runs))
+    if parts < 2:
+        return False
+
+    size, extra = divmod(len(main.runs), parts)
+    chunks, start = [], 0
+    for part in range(parts):
+        end = start + size + (1 if part < extra else 0)
+        chunks.append(main.runs[start:end])
+        start = end
+
+    heading = [element for element in slide.elements if (slide.layout_id, element.slot_id) in titles]
+    continuation = [
+        slide.model_copy(
+            deep=True,
+            update={
+                "id": f"{slide.id}-{number}",
+                "elements": [
+                    *(element.model_copy(deep=True) for element in heading),
+                    main.model_copy(deep=True, update={"runs": chunk}),
+                ],
+                "applied_compensations": [],
+            },
+        )
+        for number, chunk in enumerate(chunks[1:], start=2)
+    ]
+    main.runs = chunks[0]
+    position = deck.slides.index(slide) + 1
+    deck.slides[position:position] = continuation
+    return True
 
 
 # --- Общее для проверок ---------------------------------------------------

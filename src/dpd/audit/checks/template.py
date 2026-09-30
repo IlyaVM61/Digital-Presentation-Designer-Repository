@@ -46,6 +46,7 @@ FONT_NOT_IN_SET = CheckSpec(
     fixability="mechanical",
     sublayer="4b",
     title="Гарнитура не из фактического состава шаблона",
+    plain="Шрифт не из шаблона",
 )
 
 TOO_MANY_FACES = CheckSpec(
@@ -56,6 +57,7 @@ TOO_MANY_FACES = CheckSpec(
     fixability="mechanical",
     sublayer="4b",
     title="Больше двух гарнитур на слайде",
+    plain="На слайде больше двух шрифтов",
 )
 
 SIZE_NOT_IN_SCALE = CheckSpec(
@@ -66,6 +68,7 @@ SIZE_NOT_IN_SCALE = CheckSpec(
     fixability="mechanical",
     sublayer="4b",
     title="Кегль не из типографической шкалы",
+    plain="Размер текста не из тех, что есть в шаблоне",
 )
 
 COLOR_NOT_IN_PALETTE = CheckSpec(

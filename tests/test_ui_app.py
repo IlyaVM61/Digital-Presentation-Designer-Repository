@@ -460,3 +460,84 @@ def test_failed_run_is_explained_plainly(app: AppTest, monkeypatch: pytest.Monke
     assert "soffice" not in на_виду, "текст исключения стоит на виду"
     assert not jargon_in(на_виду)
     assert "soffice" in page_text(app, folded=True), "причину сбоя не найти"
+
+
+# --- T-40: работа с находками ------------------------------------------------
+#
+# Находки аудита — самая текстовая часть страницы, и словарь T-55 держит их
+# так же, как всё остальное. Механические исправлены до показа; на виду
+# остаются те, где решать пользователю, и у каждой — только применимые
+# действия.
+
+CROWDED = OUTLINE + """Что умеет система
+- Разбор шаблона занимает меньше секунды
+- Три варианта собираются одним нажатием
+- Таблицы остаются таблицами
+- Диаграммы остаются диаграммами
+- Проверка оформления идёт до выгрузки
+- Механические дефекты исправляются сами
+- Файлы готовы в трёх форматах
+"""
+
+
+def crowded(app: AppTest) -> AppTest:
+    upload(app, template_file())
+    app.text_area[0].set_value(CROWDED)
+    for checkbox in app.checkbox:
+        checkbox.set_value("pptx" in checkbox.label.lower())
+    return app.button[0].click().run()
+
+
+def fix_choice(app: AppTest):
+    """Выбор для переполненного слайда — ищется по словам, которые видит человек."""
+    return next((radio for radio in app.radio if "пункт" in radio.label.lower()), None)
+
+
+def test_finding_can_be_fixed_from_the_page(app: AppTest) -> None:
+    """Критерий приёмки T-40 глазами пользователя: выбрал, нажал, проверено заново."""
+    crowded(app)
+    assert not app.exception, app.exception
+    choice = fix_choice(app)
+    assert choice is not None, "переполненный слайд не предложен к исправлению"
+    assert len(choice.options) == 2, "кроме «оставить как есть» применим один способ"
+    перенос = next(option for option in choice.options if option.startswith("Перенести"))
+
+    choice.set_value(перенос)
+    app.button(key="apply-fixes").click().run()
+
+    assert not app.exception, app.exception
+    assert fix_choice(app) is None, "находка осталась после исправления"
+    итог = " ".join(item.value for item in app.success)
+    assert "проверили заново" in итог.lower(), итог
+
+
+def test_findings_speak_plain_language(app: AppTest) -> None:
+    """Находки и действия на виду проходят словарь — до исправления и после."""
+    crowded(app)
+    assert not app.exception, app.exception
+    assert not jargon_in(page_text(app, folded=False))
+
+    choice = fix_choice(app)
+    choice.set_value(next(option for option in choice.options if option.startswith("Перенести")))
+    app.button(key="apply-fixes").click().run()
+
+    assert not app.exception, app.exception
+    assert not jargon_in(page_text(app, folded=False))
+
+
+def test_finding_details_are_folded_not_lost(app: AppTest) -> None:
+    """Исходная формулировка проверки — для дизайнера, в свёрнутом блоке."""
+    crowded(app)
+
+    свёрнуто = page_text(app, folded=True)
+    assert "density.too_many_bullets" in свёрнуто
+    assert "список перестаёт читаться" in свёрнуто
+
+
+def test_leaving_everything_as_is_is_a_valid_choice(app: AppTest) -> None:
+    """«Оставить как есть» — выбор по умолчанию, и он ничего не ломает."""
+    crowded(app)
+    app.button(key="apply-fixes").click().run()
+
+    assert not app.exception, app.exception
+    assert fix_choice(app) is not None, "находка пропала, хотя ничего не выбрано"
