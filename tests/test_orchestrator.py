@@ -21,6 +21,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+import yaml
 
 from dpd.generation import structure_from_outline
 from dpd.orchestrator import STAGES, run_pipeline
@@ -146,25 +147,26 @@ def test_only_requested_formats_are_offered(template: Path, out_dir: Path) -> No
 def test_libreoffice_is_started_once_for_previews_and_pdf(
     template: Path, out_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Превью и PDF довольствуются одной конвертацией.
+    """Превью и PDF всех трёх вариантов довольствуются одной конвертацией.
 
     Это самая дорогая операция пайплайна — 13–28 с, — и второй запуск стоил
     бы столько же на тот же результат. При бюджете в пять минут на полный
-    цикл такая трата недопустима.
+    цикл такая трата недопустима. С T-39 в конвертацию идут все три
+    варианта: их показывают рядом, и колоды передаются одной пачкой.
     """
     if soffice_path() is None:
         pytest.skip("LibreOffice не найден")
 
     from dpd import orchestrator
 
-    calls: list[Path] = []
-    original = orchestrator.convert_to_pdf
+    calls: list[list[Path]] = []
+    original = orchestrator.convert_to_pdfs
 
-    def counted(pptx_path, out, **kwargs):
-        calls.append(Path(pptx_path))
-        return original(pptx_path, out, **kwargs)
+    def counted(pptx_paths, out, **kwargs):
+        calls.append([Path(path) for path in pptx_paths])
+        return original(pptx_paths, out, **kwargs)
 
-    monkeypatch.setattr(orchestrator, "convert_to_pdf", counted)
+    monkeypatch.setattr(orchestrator, "convert_to_pdfs", counted)
 
     result = run_pipeline(
         template,
@@ -175,9 +177,19 @@ def test_libreoffice_is_started_once_for_previews_and_pdf(
     )
 
     assert len(calls) == 1, f"LibreOffice запущен {len(calls)} раз"
+    assert len(calls[0]) == 3, "в конвертацию попали не все варианты"
     assert result.exports["pdf"].is_file()
     assert len(result.previews) == len(result.chosen.slides)
     assert result.timings["render"] > 0
+
+    # T-39: превью каждого варианта свои, и в одну папку они не сваливаются.
+    assert set(result.variant_previews) == {deck.variant for deck in result.variants}
+    for deck in result.variants:
+        images = result.variant_previews[deck.variant]
+        assert len(images) == len(deck.slides), f"вариант {deck.variant}: превью не на каждый слайд"
+    assert len({image for images in result.variant_previews.values() for image in images}) == 3 * len(
+        result.chosen.slides
+    ), "превью одного варианта перезаписали превью другого"
 
 
 # --- Выбор варианта --------------------------------------------------------
@@ -197,3 +209,65 @@ def test_unknown_variant_is_a_loud_error(template: Path, out_dir: Path) -> None:
         run_pipeline(
             template, structure_from_outline(OUTLINE), out_dir / "bad", formats=("pptx",), variant="Я"
         )
+
+
+# --- T-39: три варианта рядом и выбор после прогона -------------------------
+#
+# Пользователь выбирает вариант, посмотрев на все три. Значит, к концу прогона
+# готовы файлы каждого: выбор не должен стоить второго прогона и второго
+# запуска LibreOffice. Цена измерена: +1–2 с на `.pptx` двух лишних
+# вариантов, +8 с на их конвертацию, HTML почти бесплатен.
+
+
+def test_every_variant_is_exported_for_choice_after_the_run(template: Path, out_dir: Path) -> None:
+    result = run_pipeline(
+        template, structure_from_outline(OUTLINE), out_dir / "all", formats=("pptx", "html")
+    )
+
+    assert set(result.variant_exports) == {"A", "B", "C"}
+    for variant, files in result.variant_exports.items():
+        assert set(files) == {"pptx", "html"}, f"вариант {variant}: не все форматы"
+        assert all(path.is_file() for path in files.values())
+        assert all(f"-{variant}." in path.name for path in files.values()), "имя файла не называет вариант"
+    assert result.exports == result.variant_exports[result.chosen.variant]
+
+
+def test_variant_names_come_from_the_config(template: Path, out_dir: Path) -> None:
+    """Интерфейс называет варианты по-человечески, а имена живут в конфиге."""
+    from dpd.layout.variants import load_profiles
+
+    result = run_pipeline(template, structure_from_outline(OUTLINE), out_dir / "names", formats=("html",))
+
+    assert result.variant_names == {profile.id: profile.name for profile in load_profiles()}
+
+
+def test_identical_variants_are_reported(
+    template: Path, out_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Три одинаковые колоды нельзя молча выдать за три варианта.
+
+    Стратегия вариантов прямо требует предъявить этот факт пользователю: на
+    бедном шаблоне оси регистра могут не сработать. Одинаковые профили
+    воспроизводят такой шаблон без подбора файла.
+    """
+    same = {"prefer_scheme": "any", "prefer_families": ["content"], "size_shift": 0, "layout_offset": 0}
+    config = tmp_path / "variants.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {"version": 1, "profiles": [{"id": name, "name": f"Вариант {name}", **same} for name in "ABC"]},
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DPD_VARIANTS_CONFIG", str(config))
+
+    result = run_pipeline(template, structure_from_outline(OUTLINE), out_dir / "same", formats=("html",))
+
+    assert [finding.check_id for finding in result.distinction] == ["variants.low_distinction"]
+
+
+def test_distinct_variants_raise_no_alarm(template: Path, out_dir: Path) -> None:
+    """На нормальном шаблоне проверка молчит — иначе предупреждению не поверят."""
+    result = run_pipeline(template, structure_from_outline(OUTLINE), out_dir / "distinct", formats=("html",))
+
+    assert result.distinction == []
