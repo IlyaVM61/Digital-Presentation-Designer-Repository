@@ -339,3 +339,68 @@ def test_revision_without_choices_changes_nothing(template: Path, out_dir: Path)
 
     assert revised.reports[variant] == result.reports[variant]
     assert not revised.revision.applied
+
+
+# --- T-41: разбивка времени в отчёте ----------------------------------------
+#
+# Бюджет ТЗ — пять минут на полный цикл, считая разбор шаблона (решение D4).
+# Разбивка по этапам закрывает вопрос о трактовке при любом прочтении, но
+# только если она лежит в отчёте, а не живёт в памяти до конца прогона
+# (NFR-1а).
+
+
+def test_every_report_carries_the_run_timings(template: Path, out_dir: Path) -> None:
+    """Критерий приёмки T-41: `timings` отчёта заполнен.
+
+    Этапы общие для трёх вариантов — разбор один, конвертация одна, — поэтому
+    каждый отчёт несёт разбивку прогона целиком. Делить время по вариантам
+    значило бы его выдумывать.
+    """
+    result = run_pipeline(
+        template, structure_from_outline(OUTLINE), out_dir / "report-timings", formats=("pptx", "html")
+    )
+
+    assert set(result.timings) == {"parse", "layout", "audit", "export"}
+    for variant, report in result.reports.items():
+        assert report.timings == result.timings, f"вариант {variant}: в отчёте нет разбивки времени"
+
+
+def test_timings_follow_the_stage_order(template: Path, out_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Разбивка читается сверху вниз как ход прогона.
+
+    Выгрузка `.pptx` начинается раньше рендера, и словарь, заполняемый по
+    ходу, ставил бы «Сохраняем файлы» перед «Готовим превью». LibreOffice
+    подменён: проверяется порядок, а не конвертация.
+    """
+    from dpd import orchestrator
+
+    monkeypatch.setattr(
+        orchestrator, "convert_to_pdfs", lambda paths, out, **_: [Path(path).with_suffix(".pdf") for path in paths]
+    )
+    monkeypatch.setattr(orchestrator, "render_pdf_pages", lambda pdf, out, **_: [])
+
+    result = run_pipeline(
+        template, structure_from_outline(OUTLINE), out_dir / "order", formats=("pptx",), previews=True
+    )
+
+    assert list(result.timings) == list(STAGES)
+    assert list(result.reports[result.chosen.variant].timings) == list(STAGES)
+
+
+def test_revised_report_keeps_the_run_timings(template: Path, out_dir: Path) -> None:
+    """Исправление по выбору пересобирает отчёт, но разбивку не стирает.
+
+    Время самого исправления в бюджет цикла не входит: между прогоном и
+    исправлением лежит решение пользователя, и оно занимает сколько угодно.
+    """
+    from dpd.orchestrator import revise
+
+    result = run_pipeline(template, structure_from_outline(CROWDED), out_dir / "revise-timings", formats=("html",))
+    variant = result.variants[0].variant
+    report = result.reports[variant]
+    index = next(i for i, f in enumerate(report.findings) if f.check_id == "density.too_many_bullets")
+
+    revised = revise(result, variant, {index: "split"})
+
+    assert revised.reports[variant].findings != report.findings, "исправление не состоялось"
+    assert revised.reports[variant].timings == result.timings

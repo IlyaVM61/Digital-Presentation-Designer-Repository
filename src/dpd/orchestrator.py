@@ -196,6 +196,17 @@ def run_pipeline(
         variants, schema, template_path, out_dir, formats, previews, timings, report_progress
     )
 
+    # Выгрузка `.pptx` начинается раньше рендера, и по ходу прогона словарь
+    # заполняется не в том порядке, в каком его читает человек. Неизвестный
+    # этап роняет сортировку: без места в `STAGES` у него нет ни названия,
+    # ни доли в полосе прогресса.
+    timings = dict(sorted(timings.items(), key=lambda item: STAGES.index(item[0])))
+    # Разбивка времени принадлежит отчёту (NFR-1а): он остаётся от прогона,
+    # когда интерфейс закрыт. Этапы общие для трёх вариантов — разбор один,
+    # конвертация одна, — и делить время между вариантами значило бы его
+    # выдумывать; каждый отчёт несёт разбивку прогона целиком.
+    reports = {key: report.model_copy(update={"timings": dict(timings)}) for key, report in reports.items()}
+
     return RunResult(
         run_id=run_id,
         template=schema,
@@ -244,7 +255,11 @@ def revise(result: RunResult, variant: str, choices: Mapping[int, str]) -> RunRe
     outcome = apply_remedies(context, report, choices)
     repaired = repair(replace(context, deck=outcome.deck))
     earlier = [finding for finding in report.findings if finding.status == "autofixed"]
-    fresh = repaired.report.model_copy(update={"findings": earlier + list(repaired.report.findings)})
+    # Разбивка остаётся разбивкой прогона: время исправления в бюджет цикла не
+    # входит, между прогоном и исправлением лежит решение пользователя.
+    fresh = repaired.report.model_copy(
+        update={"findings": earlier + list(repaired.report.findings), "timings": report.timings}
+    )
 
     variants = [repaired.deck if item.variant == variant else item for item in result.variants]
     exports, images = _export(

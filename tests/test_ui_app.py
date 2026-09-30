@@ -169,15 +169,27 @@ def test_theme_font_conflict_is_shown(app: AppTest) -> None:
 
 
 def test_timings_are_shown_after_the_run(app: AppTest) -> None:
-    """Время этапов видно пользователю: бюджет ТЗ — пять минут на цикл."""
-    from dpd.orchestrator import STAGE_TITLES
+    """Критерий приёмки T-41: общее время видно пользователю.
+
+    Итог — сразу, разбивка по этапам — в свёрнутом блоке и в порядке хода
+    прогона: она нужна, чтобы понять, что не уложилось в пять минут, а
+    маркетологу на виду достаточно итога.
+    """
+    import re
+
+    from dpd.orchestrator import STAGE_TITLES, STAGES
 
     upload(app, template_file())
     app.text_area[0].set_value(OUTLINE)
     app.button[0].click().run()
 
-    текст = " ".join(item.value for item in app.markdown)
-    assert "с" in текст and any(stage in текст for stage in STAGE_TITLES.values())
+    assert re.search(r"готова за \d+[.,]\d с", page_text(app, folded=False)), "общего времени не видно"
+    блок = next(item for item in app.expander if item.label == "Из чего сложилось время")
+    разбивка = " ".join(item.value for item in блок.markdown)
+    этапы = [stage for stage in STAGES if stage in app.session_state["result"].timings]
+    позиции = [разбивка.find(STAGE_TITLES[stage]) for stage in этапы]
+    assert -1 not in позиции, f"в разбивке не все этапы: {разбивка}"
+    assert позиции == sorted(позиции), f"этапы идут не в порядке прогона: {разбивка}"
 
 
 def test_empty_plan_is_refused_with_an_explanation(app: AppTest) -> None:
