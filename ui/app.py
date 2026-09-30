@@ -20,13 +20,22 @@ Streamlit выбран решением D6 (ADR-0005): сценарий мног
 **Варианты выбираются после того, как их увидели** (T-39). Три варианта
 стоят рядом, строка на слайд, а файлы всех трёх готовы с прогона: выбор
 переключает кнопки скачивания и ничего не пересобирает.
+
+**Страница говорит словами пользователя** (T-55). Пользователь — маркетолог,
+а не типограф: «слот», «кегль», «ось варианта» ему мешают. На виду —
+человеческая формулировка, подробности для дизайнера свёрнуты, но не
+удалены: на них держится правило «назвать свой выбор» (ADR-0006). Ошибка
+тоже объясняется фразой, а её техническая причина лежит в подробностях.
+Словарь запрещённых на виду слов — в `tests/test_ui_app.py`.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import time
+from collections import Counter
 from pathlib import Path
 
 import streamlit as st
@@ -67,7 +76,11 @@ def diagnose(template_bytes: bytes, name: str) -> dict[str, object]:
     """
     from dpd.parsing import parse_template
 
-    path = Path(tempfile.gettempdir()) / f"dpd-{abs(hash(template_bytes))}-{name}"
+    # Имя файла сохраняется как есть: от него зависят имена готовых файлов,
+    # и пользователь должен узнать в них свой шаблон, а не служебный номер.
+    folder = Path(tempfile.gettempdir()) / f"dpd-{abs(hash(template_bytes))}"
+    folder.mkdir(exist_ok=True)
+    path = folder / Path(name).name
     path.write_bytes(template_bytes)
 
     schema = parse_template(path)
@@ -77,7 +90,7 @@ def diagnose(template_bytes: bytes, name: str) -> dict[str, object]:
         "path": path,
         "layouts": len(schema.layouts),
         "slots": sum(len(layout.slots) for layout in schema.layouts),
-        "font": leading.family if leading else "не определена",
+        "font": leading.family if leading else "не определён",
         "font_confidence": leading.confidence if leading else 0.0,
         # Тема файла расходится с оформлением во всех четырёх проверенных
         # шаблонах. Расхождение показывается: по нему видно, на чём основано
@@ -93,6 +106,69 @@ def diagnose(template_bytes: bytes, name: str) -> dict[str, object]:
 def fixed(report: AuditReport) -> int:
     """Сколько находок система исправила сама."""
     return len([item for item in report.findings if item.status == "autofixed"])
+
+
+HEX = re.compile(r"#?[0-9A-Fa-f]{6}")
+
+AXIS_WORDS = {
+    "макетов": "расположением блоков",
+    "цветовых схем": "расцветкой",
+    "кеглей": "размером текста",
+}
+"""Признаки различия вариантов словами пользователя. Ключи — имена из
+`evidence` проверки `variants.low_distinction`; незнакомый признак
+называется общим словом, а не своим внутренним именем."""
+
+
+def swatches(colors: list[str]) -> str:
+    """Цвета шаблона образцами: фирменный цвет узнают глазом, а не по коду.
+
+    В разметку попадает только то, что похоже на цвет: значение пришло из
+    чужого файла, а страница вставляет его как HTML.
+    """
+    return " ".join(
+        f'<span title="{value}" style="display:inline-block;width:1.4em;height:1.4em;'
+        f'vertical-align:middle;border-radius:4px;border:1px solid #8886;'
+        f'background:#{value.lstrip("#")}"></span>'
+        for value in colors
+        if HEX.fullmatch(value)
+    )
+
+
+def enumerate_words(words: list[str]) -> str:
+    """«А», «А и Б», «А, Б и В»."""
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " и " + words[-1]
+
+
+def similarity_note(result: RunResult) -> str:
+    """Предупреждение о похожих вариантах — чем не различаются, по-человечески.
+
+    Формулировка проверки («работает осей: 2 из 3») остаётся в подробностях:
+    она точна, но написана для того, кто знает, что такое ось регистра.
+    """
+
+    def words(key: str) -> list[str]:
+        названия = [
+            AXIS_WORDS.get(name, "оформлением")
+            for finding in result.distinction
+            for name in finding.evidence.get(key, [])
+        ]
+        return list(dict.fromkeys(названия))
+
+    нет, есть = words("missing"), words("working")
+    текст = "Варианты получились похожими"
+    if нет:
+        текст += f": они не различаются {enumerate_words(нет)}"
+    текст += ". Дело в шаблоне — другого оформления в нём нет, и взять его неоткуда. "
+    if есть:
+        return текст + f"Различаются они {enumerate_words(есть)} — посмотрите, хватит ли этого."
+    return текст + "Фактически это один и тот же вариант."
+
+
+def show_details(title: str, error: BaseException) -> None:
+    """Причина сбоя — в подробностях: пригодится разработчику, а не пользователю."""
+    with st.expander(title):
+        st.code(f"{type(error).__name__}: {error}", language=None)
 
 
 def show_side_by_side(result: RunResult) -> None:
@@ -125,51 +201,67 @@ def show_side_by_side(result: RunResult) -> None:
 st.set_page_config(page_title="Цифровой дизайнер презентаций", layout="wide")
 st.title("Цифровой дизайнер презентаций")
 st.caption(
-    "Читает чужой шаблон как набор правил и собирает по нему новые слайды. "
-    "Шаблон остаётся у вас: файл не покидает эту машину."
+    "Собирает новые слайды в оформлении вашего шаблона: шрифты, цвета и макеты "
+    "берутся из него. Файл не покидает этот компьютер."
 )
 
 uploaded = st.file_uploader("Шаблон презентации", type=["pptx"])
 
 report = None
 if uploaded is not None:
-    report = diagnose(uploaded.getvalue(), uploaded.name)
+    try:
+        report = diagnose(uploaded.getvalue(), uploaded.name)
+    except Exception as error:  # noqa: BLE001 — пользователю нужна фраза, а не трассировка
+        st.error(
+            "Этот файл не получилось открыть как презентацию. Проверьте, что это `.pptx` "
+            "и что он открывается в PowerPoint, — или загрузите другой шаблон."
+        )
+        show_details("Подробности ошибки", error)
 
+if report is not None:
     st.subheader("Что удалось прочитать в шаблоне")
-    left, right = st.columns(2)
-    with left:
-        тема = (
-            f"тема файла объявляет {', '.join(report['theme_fonts'])} — "
-            "система поверила разметке"
-            if report["theme_fonts"]
-            else "тема файла с разметкой согласна"
+    шрифт = f"**Шрифт:** {report['font']}"
+    if report["theme_fonts"]:
+        # Тема файла расходится с оформлением во всех проверенных шаблонах.
+        # Выбор системы называется на виду: это правило владельца (ADR-0006).
+        шрифт += (
+            f" — так на слайдах шаблона. В теме оформления файла указан "
+            f"{', '.join(report['theme_fonts'])}, но система берёт то, что на слайдах."
         )
-        st.markdown(
-            f"**Макетов:** {report['layouts']}, слотов в них {report['slots']}  \n"
-            f"**Ведущая гарнитура:** {report['font']} "
-            f"(уверенность {report['font_confidence']:.2f}); {тема}  \n"
-            f"**Стратегия разбора:** {report['strategy']}, качество разметки {report['quality']:.2f}"
-        )
-    with right:
-        палитра = " ".join(f"`{value}`" for value in report["colors"]) or "не определена"
-        шкала = ", ".join(f"{value:g}" for value in report["scale"]) or "не определена"
-        st.markdown(f"**Палитра:** {палитра}  \n**Шкала кеглей:** {шкала} pt")
+    цвета = swatches(report["colors"]) or "не определены"
+    st.markdown(
+        f"**Макетов слайдов:** {report['layouts']}  \n{шрифт}  \n**Фирменные цвета:** {цвета}",
+        unsafe_allow_html=True,
+    )
 
     if report["font_confidence"] < 0.4:
         st.warning(
-            "Шаблон размечен вразнобой: ведущая гарнитура набирает меньше двух пятых разметки. "
-            "Правила выведены предположительно, и аудит понизит находки до рекомендаций."
+            "Шрифты в шаблоне смешаны, и ни один не преобладает. Система взяла самый "
+            "частый, но это предположение, поэтому замечания проверки будут советами, "
+            "а не требованиями."
         )
 
-st.subheader("План колоды")
+    with st.expander("Подробности для дизайнера"):
+        тема = ", ".join(report["theme_fonts"]) or "совпадает с разметкой"
+        палитра = " ".join(f"`{value}`" for value in report["colors"]) or "не определена"
+        шкала = ", ".join(f"{value:g}" for value in report["scale"]) or "не определена"
+        st.markdown(
+            f"**Макетов:** {report['layouts']}, слотов в них {report['slots']}  \n"
+            f"**Ведущая гарнитура:** {report['font']}, уверенность "
+            f"{report['font_confidence']:.2f}; тема объявляет: {тема}  \n"
+            f"**Стратегия разбора:** {report['strategy']}, качество разметки {report['quality']:.2f}  \n"
+            f"**Палитра:** {палитра}  \n**Шкала кеглей:** {шкала} pt"
+        )
+
+st.subheader("План презентации")
 st.caption(
     "Строка без знака — заголовок слайда, строка со знаком «-» — его пункт. "
     "Пока содержание пишете вы: генерация плана по свободному брифу появится позже."
 )
 outline = st.text_area("План", value=PLACEHOLDER_OUTLINE, height=200, label_visibility="collapsed")
 
-st.subheader("Форматы выгрузки")
-st.caption(f"Готовые файлы сохраняются в {output_dir()} и предлагаются к скачиванию.")
+st.subheader("В каких форматах скачать", help=f"Копии файлов сохраняются в {output_dir()}")
+st.caption("Файлы готовятся для всех трёх вариантов сразу — выбрать можно после сборки.")
 columns = st.columns(len(FORMATS) + 1)
 chosen_formats = [
     key
@@ -182,14 +274,15 @@ with columns[-1]:
     previews = st.checkbox(
         "Превью слайдов",
         value=soffice_path() is not None,
-        help="Показывает три варианта рядом. Требует LibreOffice, добавляет около 20 с",
+        help="Показывает три варианта рядом, чтобы выбрать глазами. "
+        "Нужна программа LibreOffice; добавляет около 20 секунд",
     )
 
-if st.button("Собрать колоду", type="primary"):
+if st.button("Собрать презентацию", type="primary"):
     if uploaded is None or report is None:
         st.warning("Сначала загрузите шаблон `.pptx` — без него собирать не по чему.")
     elif not outline.strip():
-        st.warning("План колоды пуст. Напишите хотя бы один заголовок.")
+        st.warning("План презентации пуст. Напишите хотя бы один заголовок.")
     elif not chosen_formats:
         st.warning("Выберите хотя бы один формат выгрузки.")
     else:
@@ -215,7 +308,11 @@ if st.button("Собрать колоду", type="primary"):
         except Exception as error:  # noqa: BLE001 — пользователю нужна причина, а не трассировка
             bar.empty()
             st.session_state.pop("result", None)
-            st.error(f"Прогон не удался: {error}")
+            st.error(
+                "Собрать презентацию не получилось. Попробуйте ещё раз; если сбой "
+                "повторится, передайте разработчикам подробности ниже."
+            )
+            show_details("Подробности сбоя", error)
         else:
             bar.progress(1.0, text="Готово")
             # Итог кладётся в состояние страницы, а не показывается здесь же:
@@ -227,30 +324,30 @@ if st.button("Собрать колоду", type="primary"):
 result = st.session_state.get("result")
 if result is not None:
     st.divider()
-    st.success(f"Колода готова за {st.session_state.get('seconds', 0.0):.1f} с")
+    st.success(f"Презентация готова за {st.session_state.get('seconds', 0.0):.1f} с")
 
-    st.markdown(
-        "**Время по этапам:** "
-        + ", ".join(
-            f"{STAGE_TITLES.get(stage, stage)} — {seconds:.1f} с"
-            for stage, seconds in result.timings.items()
+    with st.expander("Из чего сложилось время"):
+        st.markdown(
+            ", ".join(
+                f"{STAGE_TITLES.get(stage, stage)} — {seconds:.1f} с"
+                for stage, seconds in result.timings.items()
+            )
         )
-    )
 
     находки = sum(len(report_.findings) for report_ in result.reports.values())
     исправлено = sum(fixed(report_) for report_ in result.reports.values())
     st.markdown(
-        f"**Аудит:** собрано вариантов {len(result.variants)}, "
-        f"находок {находки}, из них исправлено автоматически {исправлено}."
+        f"**Проверка оформления:** во всех вариантах замечаний {находки}, "
+        f"из них система исправила сама {исправлено}."
     )
 
     if result.distinction:
         # Три одинаковые колонки без объяснения — худшее, что можно показать:
         # пользователь решит, что система сломалась, или не заметит подмены.
-        st.warning(
-            "Варианты получились похожими: в шаблоне не нашлось, чем их различить. "
-            + " ".join(finding.message for finding in result.distinction)
-        )
+        st.warning(similarity_note(result))
+        with st.expander("Подробности проверки"):
+            for finding in result.distinction:
+                st.markdown(f"- {finding.message}")
 
     st.subheader("Три варианта")
     show_side_by_side(result)
@@ -262,7 +359,7 @@ if result is not None:
         index=варианты.index(result.chosen.variant),
         format_func=lambda key: result.variant_names.get(key, key),
         captions=[
-            f"находок {len(result.reports[key].findings)}, "
+            f"замечаний {len(result.reports[key].findings)}, "
             f"исправлено автоматически {fixed(result.reports[key])}"
             for key in варианты
         ],
@@ -275,11 +372,21 @@ if result is not None:
         # Система не вправе молча менять оформление: она называет, что
         # выбрала и что объявляет сам шаблон. Подробности свёрнуты — человек
         # пришёл делать презентацию, а не разбираться в наследовании стилей.
-        with st.expander(f"Система приняла решений за вас: {len(колода.decisions)}"):
-            for decision in колода.decisions:
-                st.markdown(f"- {decision.reason} (в шаблоне объявлено: {decision.declared})")
+        # Одинаковые решения по разным блокам сводятся в одну строку: двадцать
+        # повторов «шрифт Play вместо Arial» ничего не сообщают.
+        группы = Counter((item.kind, item.chosen, item.declared) for item in колода.decisions)
+        with st.expander(f"Где шаблон противоречит себе, система выбрала сама: {len(группы)}"):
+            for (kind, chosen, declared), count in группы.items():
+                что = "Шрифт" if kind == "font" else "Размер текста"
+                мест = f" (мест на слайдах: {count})" if count > 1 else ""
+                st.markdown(
+                    f"- {что} {chosen} — так на слайдах шаблона; в его настройках "
+                    f"указано {declared}{мест}"
+                )
             st.caption(
-                "Переключить правило можно в configs/layout.yaml: "
+                "Для дизайнера: "
+                + "; ".join(sorted({item.reason for item in колода.decisions}))
+                + ". Переключить правило можно в configs/layout.yaml: "
                 "`conflict_rule: template` заставит следовать объявлению шаблона."
             )
 

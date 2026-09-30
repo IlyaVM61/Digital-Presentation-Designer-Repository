@@ -308,13 +308,13 @@ JARGON = {
     "уверенность": r"\bуверенност",
     "стратегия разбора": r"\bстратеги",
     "выгрузка": r"\bвыгрузк",
-    "путь к конфигу": r"configs[/\]|\.yaml\b",
+    "путь к конфигу": r"configs[/\\]|\.yaml\b",
     "внутренний идентификатор": r"\b(?:placeholder|geometry|examples)-first\b|\bconfidence\b|\bemu\b",
 }
 """Слова, которые маркетолог встречать не должен. «Макет» сюда не входит:
 так называет макеты слайдов сам PowerPoint."""
 
-TEXT_ELEMENTS = {"markdown", "caption", "title", "header", "subheader", "warning", "info", "success", "error"}
+TEXT_ELEMENTS = {"markdown", "caption", "code", "title", "header", "subheader", "warning", "info", "success", "error"}
 
 
 def page_text(app: AppTest, *, folded: bool) -> str:
