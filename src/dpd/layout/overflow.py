@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-from dpd.models import Canvas, Compensation, Slot, TextRun
+from dpd.models import Bounds, Canvas, Compensation, Slot, TextRun
 
 AVERAGE_GLYPH_WIDTH = 0.5
 """Ширина знака в долях кегля. Для пропорциональных гарнитур — около половины."""
@@ -34,10 +34,20 @@ EMU_PER_INCH = 914400
 ELLIPSIS = "…"
 
 
+def text_fits(paragraphs: list[str], bounds: Bounds, canvas: Canvas, size_pt: float) -> bool:
+    """Помещается ли текст в прямоугольник при данном кегле.
+
+    Вынесено из `fits` ради аудита: проверка `layout.text_overflow` обязана
+    оценивать вместимость тем же расчётом, что и вёрстка. Две метрики
+    разошлись бы, и аудит объявлял бы дефектом то, что вёрстка считает нормой.
+    """
+    return _lines_needed(paragraphs, bounds, canvas, size_pt) <= _lines_available(bounds, canvas, size_pt)
+
+
 def fits(paragraphs: list[str], slot: Slot, canvas: Canvas, size_pt: float | None = None) -> bool:
     """Помещается ли текст в слот при данном кегле."""
     size = size_pt or (slot.text_style.size_pt if slot.text_style else None) or 14.0
-    return _lines_needed(paragraphs, slot, canvas, size) <= _lines_available(slot, canvas, size)
+    return text_fits(paragraphs, slot.bounds, canvas, size)
 
 
 def plan_compensations(
@@ -106,8 +116,8 @@ def plan_compensations(
 
 def _truncate(paragraphs: list[str], slot: Slot, canvas: Canvas, size: float) -> list[str]:
     """Сократить текст до вмещающегося, сохранив начало каждого абзаца."""
-    available = _lines_available(slot, canvas, size)
-    per_line = max(_chars_per_line(slot, canvas, size), 1)
+    available = _lines_available(slot.bounds, canvas, size)
+    per_line = max(_chars_per_line(slot.bounds, canvas, size), 1)
 
     kept: list[str] = []
     used = 0
@@ -125,16 +135,16 @@ def _truncate(paragraphs: list[str], slot: Slot, canvas: Canvas, size: float) ->
     return kept or [ELLIPSIS]
 
 
-def _chars_per_line(slot: Slot, canvas: Canvas, size: float) -> int:
-    width_pt = slot.bounds.w * canvas.width_emu / EMU_PER_INCH * POINTS_PER_INCH
+def _chars_per_line(bounds: Bounds, canvas: Canvas, size: float) -> int:
+    width_pt = bounds.w * canvas.width_emu / EMU_PER_INCH * POINTS_PER_INCH
     return int(width_pt / (size * AVERAGE_GLYPH_WIDTH))
 
 
-def _lines_available(slot: Slot, canvas: Canvas, size: float) -> int:
-    height_pt = slot.bounds.h * canvas.height_emu / EMU_PER_INCH * POINTS_PER_INCH
+def _lines_available(bounds: Bounds, canvas: Canvas, size: float) -> int:
+    height_pt = bounds.h * canvas.height_emu / EMU_PER_INCH * POINTS_PER_INCH
     return max(int(height_pt / (size * LINE_HEIGHT)), 0)
 
 
-def _lines_needed(paragraphs: list[str], slot: Slot, canvas: Canvas, size: float) -> int:
-    per_line = max(_chars_per_line(slot, canvas, size), 1)
+def _lines_needed(paragraphs: list[str], bounds: Bounds, canvas: Canvas, size: float) -> int:
+    per_line = max(_chars_per_line(bounds, canvas, size), 1)
     return sum(max(1, -(-len(paragraph) // per_line)) for paragraph in paragraphs)

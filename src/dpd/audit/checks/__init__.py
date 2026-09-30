@@ -9,19 +9,20 @@
 В 62% макетов одного из калибровочных шаблонов фоном служит изображение,
 поэтому проверка 4.5:1 гибридная.
 
+Каркас единицы — `dpd.audit.registry` (T-27). Проверка объявляет `CheckSpec`,
+вешает на функцию `@check(SPEC)` и возвращает находки через `SPEC.finding(...)`;
+модули каталога обходятся при запуске, поэтому **новая проверка добавляется
+файлом и этот список править не нужно**. Перечисленные ниже имена оставлены
+для прямого вызова из тестов самих проверок.
+
 Реализованы `integrity.raster_slide` (T-10) и `variants.low_distinction`
-(T-26). Общий каркас проверки как единицы — задача T-27; до неё проверки
-вызываются напрямую.
+(T-26). Остальные — задачи T-28 … T-32.
 """
 
-from dpd.audit.checks.integrity import (
-    DEFAULT_COVERAGE_THRESHOLD,
-    check_raster_slide,
-)
+from dpd.audit.checks.integrity import check_raster_slide
 from dpd.audit.checks.variants import check_variant_distinction
 
 __all__ = [
-    "DEFAULT_COVERAGE_THRESHOLD",
     "check_raster_slide",
     "check_variant_distinction",
 ]

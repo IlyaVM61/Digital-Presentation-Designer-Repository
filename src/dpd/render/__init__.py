@@ -10,9 +10,17 @@
 Обёртка скрывает LibreOffice за интерфейсом: смена рендерера не затрагивает
 остальные слои.
 
-Реализован рендер в изображения (T-09). Подсветка находок — задача T-35.
+Подсветка находок (T-35) наносится на копию рендера: исходный нужен для
+проверки контраста на фоне-изображении, и рамка поверх фона испортила бы
+измерение.
 """
 
+from dpd.render.highlight import (
+    SEVERITY_COLORS,
+    Highlighted,
+    area_label,
+    highlight_slides,
+)
 from dpd.render.renderer import (
     DEFAULT_DPI,
     DEFAULT_TIMEOUT_SEC,
@@ -25,7 +33,11 @@ from dpd.render.renderer import (
 __all__ = [
     "DEFAULT_DPI",
     "DEFAULT_TIMEOUT_SEC",
+    "SEVERITY_COLORS",
+    "Highlighted",
+    "area_label",
     "convert_to_pdf",
+    "highlight_slides",
     "render_pdf_pages",
     "render_slides",
     "soffice_path",

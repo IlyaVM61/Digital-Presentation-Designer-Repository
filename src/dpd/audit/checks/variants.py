@@ -14,24 +14,34 @@
 
 from __future__ import annotations
 
+from dpd.audit.registry import CheckSpec, check, param
 from dpd.models import Finding, RenderedPresentation, TemplateSchema
 
-CHECK_ID = "variants.low_distinction"
+SPEC = CheckSpec(
+    id="variants.low_distinction",
+    category="variants",
+    check_class="file",
+    severity="warning",
+    fixability="none",
+    sublayer="variants",
+    title="Варианты вёрстки различаются слабо",
+)
 
-MIN_WORKING_AXES = 2
-"""Сколько осей должно различать варианты, чтобы разница читалась.
-
-Одной оси мало: если совпадают и макеты, и кегли, разными остаются лишь
-цвета — а на шаблоне без вариаций не остаётся и их."""
+CHECK_ID = SPEC.id
 
 
+@check(SPEC)
 def check_variant_distinction(
     variants: list[RenderedPresentation],
     template: TemplateSchema,
+    min_working_axes: int | None = None,
 ) -> list[Finding]:
     """Проверить, что три варианта действительно различаются."""
     if len(variants) < 2:
         return []
+
+    if min_working_axes is None:
+        min_working_axes = param(SPEC.id, "min_working_axes")
 
     schemes = {layout.id: layout.color_scheme for layout in template.layouts}
     axes = {
@@ -50,17 +60,13 @@ def check_variant_distinction(
     if not missing:
         return []
 
-    critical = len(working) < MIN_WORKING_AXES
     return [
-        Finding(
-            check_id=CHECK_ID,
-            severity="critical" if critical else "warning",
-            fixability="none",
-            message=(
-                f"Варианты не различаются по осям: {', '.join(missing)}. "
-                f"Работает осей: {len(working)} из {len(axes)}. "
-                "Это свойство шаблона — недостающих вариаций в нём нет."
-            ),
+        SPEC.finding(
+            f"Варианты не различаются по осям: {', '.join(missing)}. "
+            f"Работает осей: {len(working)} из {len(axes)}. "
+            "Это свойство шаблона — недостающих вариаций в нём нет.",
+            severity="critical" if len(working) < min_working_axes else "warning",
+            evidence={"working": working, "missing": missing},
         )
     ]
 

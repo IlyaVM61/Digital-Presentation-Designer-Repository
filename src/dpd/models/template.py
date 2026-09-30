@@ -3,8 +3,10 @@
 **Минимальный срез задачи T-05.** Нормативное описание в
 `docs/04-architecture/template-schema.md` шире: `markupQuality` (T-15),
 `designTokens` (T-12), `background` (T-17), `variantGroup` (T-18),
-`fixedElements`, `guides` и `warnings` появятся своими задачами. Здесь ровно
-то, без чего не собрать вертикальный срез T-06 … T-09.
+`guides` и `warnings` появятся своими задачами. `fixedElements` заведён
+задачей T-29 — его читает проверка `template.fixed_element_moved`, — но
+разбор его пока не заполняет: извлечение постоянных элементов требует
+кластеризации позиций по множеству макетов (вопрос T15).
 """
 
 from __future__ import annotations
@@ -141,6 +143,21 @@ class Slot(Contract):
     text_style: TextStyle | None = None
 
 
+class FixedElement(Contract):
+    """Постоянный элемент макета: логотип, колонтитул, плашка.
+
+    `confidence` обязателен и содержателен. Канонические позиции постоянных
+    элементов негде взять надёжно: оба мастера VK Tech пусты, а изображения
+    разбросаны по макетам от двух до десяти на макет. Позиция, выведенная
+    кластеризацией, не может служить основанием для обвинения — отсюда порог
+    уверенности у проверки `template.fixed_element_moved`.
+    """
+
+    kind: str = "logo"
+    bounds: Bounds
+    confidence: float = Field(default=0.0, ge=0, le=1)
+
+
 class Layout(Contract):
     """Макет шаблона.
 
@@ -157,6 +174,7 @@ class Layout(Contract):
     color_scheme: ColorScheme = "unknown"
     variant_group: VariantGroup | None = None
     slots: list[Slot] = Field(default_factory=list)
+    fixed_elements: list[FixedElement] = Field(default_factory=list)
 
 
 class TemplateSchema(Contract):

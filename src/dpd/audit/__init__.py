@@ -14,4 +14,40 @@
 `fixer` применяет исправления по политике D5: механические находки
 исправляются автоматически, с потерями — спрашивают, смысловые — предлагают
 перегенерацию слайда.
+
+`registry` — каркас проверки как единицы (T-27): паспорт проверки, контекст
+прогона, реестр и сборка отчёта. Проверка добавляется одним файлом в
+`checks/`, других слоёв это не касается.
 """
+
+from dpd.audit.registry import (
+    REGISTRY,
+    AuditContext,
+    CheckSpec,
+    RegisteredCheck,
+    Registry,
+    Sublayer,
+    check,
+    config_path,
+    discover,
+    load_params,
+    load_section,
+    param,
+    run_checks,
+)
+
+__all__ = [
+    "REGISTRY",
+    "AuditContext",
+    "CheckSpec",
+    "RegisteredCheck",
+    "Registry",
+    "Sublayer",
+    "check",
+    "config_path",
+    "discover",
+    "load_params",
+    "load_section",
+    "param",
+    "run_checks",
+]
