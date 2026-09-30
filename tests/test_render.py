@@ -126,3 +126,81 @@ def test_dpi_controls_resolution(deck: Path, out_dir: Path) -> None:
 def test_missing_file_raises_a_clear_error(out_dir: Path) -> None:
     with pytest.raises(FileNotFoundError):
         convert_to_pdf(out_dir / "нет-такой.pptx", out_dir)
+
+
+# --- T-39: три варианта одним запуском -------------------------------------
+#
+# Три варианта рядом требуют трёх превью, а конвертация LibreOffice — самая
+# дорогая операция пайплайна. Измерено 2026-09-30 на VK Tech: одна колода —
+# 8,8 с, три колоды одним процессом — 16,6 с, три отдельных запуска — около
+# 26 с. Холодный старт платится один раз, поэтому колоды передаются пачкой.
+
+
+def _fake_soffice(monkeypatch: pytest.MonkeyPatch, calls: list[list[str]], skip: str = "") -> None:
+    """Подменить LibreOffice: он «конвертирует» всё, что передано, кроме `skip`."""
+    from dpd.render import renderer
+
+    def run(args, **_kwargs):
+        calls.append(list(args))
+        target = Path(args[args.index("--outdir") + 1])
+        for item in args:
+            if item.endswith(".pptx") and Path(item).stem != skip:
+                (target / f"{Path(item).stem}.pdf").write_bytes(b"%PDF-1.4")
+        return renderer.subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(renderer, "soffice_path", lambda: Path("soffice"))
+    monkeypatch.setattr(renderer.subprocess, "run", run)
+
+
+def _decks(tmp_path: Path, *stems: str) -> list[Path]:
+    paths = [tmp_path / f"{stem}.pptx" for stem in stems]
+    for path in paths:
+        path.write_bytes(b"pptx")
+    return paths
+
+
+def test_several_decks_convert_in_one_libreoffice_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dpd.render import convert_to_pdfs
+
+    calls: list[list[str]] = []
+    _fake_soffice(monkeypatch, calls)
+    decks = _decks(tmp_path, "deck-A", "deck-B", "deck-C")
+
+    pdfs = convert_to_pdfs(decks, tmp_path / "out")
+
+    assert len(calls) == 1, f"LibreOffice запущен {len(calls)} раз"
+    assert [pdf.stem for pdf in pdfs] == ["deck-A", "deck-B", "deck-C"], "порядок не сохранён"
+    assert all(pdf.is_file() for pdf in pdfs)
+
+
+def test_decks_with_one_name_are_refused_before_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PDF называется по имени колоды: одноимённые перезаписали бы друг друга.
+
+    Молча выдать превью одного варианта за превью другого — ровно та ошибка,
+    ради которой варианты показываются рядом.
+    """
+    from dpd.render import convert_to_pdfs
+
+    calls: list[list[str]] = []
+    _fake_soffice(monkeypatch, calls)
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    decks = [*_decks(tmp_path / "a", "deck"), *_decks(tmp_path / "b", "deck")]
+
+    with pytest.raises(ValueError, match="deck"):
+        convert_to_pdfs(decks, tmp_path / "out")
+    assert not calls, "LibreOffice запущен зря"
+
+
+def test_missing_pdf_names_the_deck(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Если LibreOffice не справился с одной колодой, видно — с какой."""
+    from dpd.render import convert_to_pdfs
+
+    _fake_soffice(monkeypatch, [], skip="deck-B")
+
+    with pytest.raises(RuntimeError, match="deck-B"):
+        convert_to_pdfs(_decks(tmp_path, "deck-A", "deck-B"), tmp_path / "out")

@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 import pymupdf
@@ -62,9 +63,31 @@ def convert_to_pdf(
     timeout_sec: int = DEFAULT_TIMEOUT_SEC,
 ) -> Path:
     """Конвертировать `.pptx` в PDF силами LibreOffice."""
-    pptx_path, out_dir = Path(pptx_path), Path(out_dir)
-    if not pptx_path.is_file():
-        raise FileNotFoundError(f"файл не найден: {pptx_path}")
+    return convert_to_pdfs([pptx_path], out_dir, timeout_sec=timeout_sec)[0]
+
+
+def convert_to_pdfs(
+    pptx_paths: Sequence[str | Path],
+    out_dir: str | Path,
+    timeout_sec: int = DEFAULT_TIMEOUT_SEC,
+) -> list[Path]:
+    """Конвертировать несколько `.pptx` в PDF одним запуском LibreOffice.
+
+    Холодный старт платится один раз: измерено на трёх вариантах колоды —
+    16,6 с одним процессом против 8,8 с на одну колоду, то есть около 26 с
+    тремя отдельными запусками. PDF возвращаются в порядке колод.
+
+    PDF называется по имени колоды, поэтому одноимённые колоды отвергаются до
+    запуска: иначе одна молча перезаписала бы другую.
+    """
+    paths, out_dir = [Path(path) for path in pptx_paths], Path(out_dir)
+    for path in paths:
+        if not path.is_file():
+            raise FileNotFoundError(f"файл не найден: {path}")
+    stems = [path.stem for path in paths]
+    repeated = sorted({stem for stem in stems if stems.count(stem) > 1})
+    if repeated:
+        raise ValueError(f"одноимённые колоды перезапишут друг друга: {', '.join(repeated)}")
 
     soffice = soffice_path()
     if soffice is None:
@@ -86,7 +109,7 @@ def convert_to_pdf(
             "pdf",
             "--outdir",
             str(out_dir),
-            str(pptx_path),
+            *(str(path) for path in paths),
         ],
         capture_output=True,
         text=True,
@@ -94,13 +117,14 @@ def convert_to_pdf(
         check=False,
     )
 
-    pdf_path = out_dir / f"{pptx_path.stem}.pdf"
-    if not pdf_path.is_file():
+    pdfs = [out_dir / f"{path.stem}.pdf" for path in paths]
+    missing = [pdf.stem for pdf in pdfs if not pdf.is_file()]
+    if missing:
         raise RuntimeError(
-            f"LibreOffice не создал PDF (код {result.returncode}).\n"
+            f"LibreOffice не создал PDF для {', '.join(missing)} (код {result.returncode}).\n"
             f"stdout: {result.stdout.strip()}\nstderr: {result.stderr.strip()}"
         )
-    return pdf_path
+    return pdfs
 
 
 def render_pdf_pages(
