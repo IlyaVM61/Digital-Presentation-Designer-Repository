@@ -203,10 +203,18 @@ def where(finding: Finding) -> str:
 
 def show_revision(revision: Revision) -> None:
     """Итог исправления: что сделано и что показала повторная проверка."""
+    def counted(counts: dict[str, int]) -> str:
+        return ", ".join(f"«{SEVERITY_WORDS[key]}»: {value}" for key, value in counts.items()) or "замечаний нет"
+
     if revision.applied:
+        # Счёт по критичности, а не общий: предупреждение, сменившееся
+        # советом, — улучшение, а «было 2, стало 2» читалось бы как ничего.
+        только_советы = set(revision.after) == {"advice"}
         st.success(
-            f"Исправлено: {len(revision.applied)}. Проверили заново: замечаний было "
-            f"{revision.before}, стало {revision.after}. Файлы к скачиванию обновлены."
+            f"Исправлено: {len(revision.applied)}. Проверили заново. Было — "
+            f"{counted(revision.before)}. Стало — {counted(revision.after)}."
+            + (" Остались только советы — их можно не трогать." if только_советы else "")
+            + " Файлы к скачиванию обновлены."
         )
     if revision.rejected:
         st.warning(

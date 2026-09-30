@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -56,6 +57,7 @@ from dpd.models import (
     RenderedPresentation,
     TemplateSchema,
 )
+from dpd.models.audit import SEVERITY_ORDER
 from dpd.parsing import parse_template
 from dpd.render import convert_to_pdfs, render_pdf_pages
 
@@ -81,8 +83,11 @@ Progress = Callable[[str, int, int], None]
 class Revision:
     """Итог исправления по выбору пользователя: что сделано и что стало.
 
-    `before` и `after` — число открытых находок варианта до исправления и
-    после повторного аудита. `rejected` — выбранное, но не применённое: на
+    `before` и `after` — открытые находки варианта до исправления и после
+    повторного аудита, по критичности. Одного числа мало: обмен
+    предупреждения на рекомендацию — улучшение по правилу D5, а общий счёт
+    при этом не меняется, и «было 2, стало 2» выглядело бы как ничего не
+    сделанное. `rejected` — выбранное, но не применённое: на
     момент применения оно ухудшило бы колоду. `skipped` — выбранное, чья
     находка исчезла раньше, чем до неё дошла очередь.
     """
@@ -91,8 +96,8 @@ class Revision:
     applied: list[Choice] = field(default_factory=list)
     rejected: list[Choice] = field(default_factory=list)
     skipped: list[Choice] = field(default_factory=list)
-    before: int = 0
-    after: int = 0
+    before: dict[str, int] = field(default_factory=dict)
+    after: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -279,8 +284,10 @@ def revise(result: RunResult, variant: str, choices: Mapping[int, str]) -> RunRe
     )
 
 
-def _open(report: AuditReport) -> int:
-    return sum(1 for finding in report.findings if finding.status != "autofixed")
+def _open(report: AuditReport) -> dict[str, int]:
+    """Открытые находки по критичности, от самой тяжёлой."""
+    counts = Counter(finding.severity for finding in report.findings if finding.status != "autofixed")
+    return {severity: counts[severity] for severity in SEVERITY_ORDER if counts[severity]}
 
 
 def _export(

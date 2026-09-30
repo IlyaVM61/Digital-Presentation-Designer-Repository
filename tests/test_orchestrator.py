@@ -320,7 +320,7 @@ def test_finding_fix_reaudit_cycle_goes_through(template: Path, out_dir: Path) -
     assert html.count('<section class="slide"') == slides + 1
     assert "Файлы готовы в трёх форматах" in html
     assert [item.remedy.id for item in revised.revision.applied] == ["split"]
-    assert revised.revision.after < revised.revision.before
+    assert revised.revision.before.get("warning", 0) > revised.revision.after.get("warning", 0)
     assert [f for f in after.findings if f.status == "autofixed"][: len(autofixed)] == autofixed, (
         "автоисправления первого прогона пропали из отчёта"
     )
