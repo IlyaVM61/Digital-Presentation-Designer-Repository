@@ -21,6 +21,7 @@ from dpd.layout.styling import apply, style_for
 from dpd.layout.tables import build as build_table
 from dpd.models import (
     Compensation,
+    Decision,
     Layout,
     PresentationStructure,
     RenderedElement,
@@ -44,16 +45,32 @@ def compose(
     size_shift: int = 0,
     layout_offset: int = 0,
 ) -> RenderedPresentation:
-    """Собрать колоду по замыслу и правилам шаблона."""
+    """Собрать колоду по замыслу и правилам шаблона.
+
+    Решения, принятые там, где у свойства не было однозначного значения,
+    собираются в одном списке: пользователь должен видеть, что система
+    выбрала за него, а не узнавать об этом из выгруженного файла.
+    """
+    decisions: list[Decision] = []
+    slides = [
+        _compose_slide(slide, template, size_shift, layout_offset, decisions)
+        for slide in structure.slides
+    ]
     return RenderedPresentation(
         variant=variant,
         template_hash=template.source.hash,
         canvas=template.canvas,
-        slides=[
-            _compose_slide(slide, template, size_shift, layout_offset)
-            for slide in structure.slides
-        ],
+        slides=slides,
+        decisions=_unique(decisions),
     )
+
+
+def _unique(decisions: list[Decision]) -> list[Decision]:
+    """Одно решение на свойство и слот: оно повторяется на каждом слайде."""
+    видели: dict[tuple[str, str, str], Decision] = {}
+    for decision in decisions:
+        видели.setdefault((decision.kind, decision.slot_id, decision.declared), decision)
+    return list(видели.values())
 
 
 def _compose_slide(
@@ -61,6 +78,7 @@ def _compose_slide(
     template: TemplateSchema,
     size_shift: int = 0,
     layout_offset: int = 0,
+    decisions: list[Decision] | None = None,
 ) -> Slide:
     layout, decision = select(slide, template.layouts, layout_offset)
     elements: list[RenderedElement] = []
@@ -72,7 +90,7 @@ def _compose_slide(
     title_slot = _first_slot(layout, "title")
     if title_slot is not None:
         element, applied = _text_element(
-            title_slot, [slide.headline], tokens, template.canvas, scale, size_shift
+            title_slot, [slide.headline], tokens, template.canvas, scale, size_shift, decisions
         )
         elements.append(element)
         compensations.extend(applied)
@@ -81,7 +99,7 @@ def _compose_slide(
 
     visual = slide.visualization
     if body_slot is not None and visual is not None and visual.kind == "chart" and visual.chart:
-        style = style_for(body_slot, tokens, size_shift)
+        style = style_for(body_slot, tokens, size_shift, decisions)
         styled = body_slot.model_copy(update={"text_style": style})
         chart = build_chart(visual.chart, styled, tokens)
         elements.append(
@@ -98,7 +116,7 @@ def _compose_slide(
     if body_slot is not None and visual is not None and visual.kind == "table" and visual.table:
         # Визуализация занимает место содержимого: таблица и текст в одном
         # слоте наложились бы друг на друга.
-        style = style_for(body_slot, tokens, size_shift)
+        style = style_for(body_slot, tokens, size_shift, decisions)
         styled = body_slot.model_copy(update={"text_style": style})
         table, applied = build_table(visual.table, styled, tokens)
         elements.append(
@@ -116,7 +134,7 @@ def _compose_slide(
     body_items = slide.body.items if slide.body else []
     if body_slot is not None and body_items:
         element, applied = _text_element(
-            body_slot, body_items, tokens, template.canvas, scale, size_shift
+            body_slot, body_items, tokens, template.canvas, scale, size_shift, decisions
         )
         elements.append(element)
         compensations.extend(applied)
@@ -134,7 +152,7 @@ def _first_slot(layout: Layout, kind: str) -> Slot | None:
     return next((slot for slot in layout.slots if slot.kind == kind), None)
 
 
-def _text_element(slot: Slot, paragraphs: list[str], tokens, canvas, scale, size_shift=0):
+def _text_element(slot: Slot, paragraphs: list[str], tokens, canvas, scale, size_shift=0, decisions=None):
     """Уложить текст в слот.
 
     Геометрия берётся из слота без изменений: вёрстка не выдумывает
@@ -145,7 +163,7 @@ def _text_element(slot: Slot, paragraphs: list[str], tokens, canvas, scale, size
     берётся из правил шаблона: стиль слота, разрешённый по цепочке
     наследования, с опорой на дизайн-токены там, где слот молчит.
     """
-    style = style_for(slot, tokens, size_shift)
+    style = style_for(slot, tokens, size_shift, decisions)
     styled = slot.model_copy(update={"text_style": style})
     compensations, runs = plan_compensations(
         paragraphs, styled, canvas, scale or [style.size_pt]

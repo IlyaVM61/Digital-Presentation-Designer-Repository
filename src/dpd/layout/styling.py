@@ -14,13 +14,51 @@
 
 from __future__ import annotations
 
-from dpd.models import DesignTokens, Slot, TextRun, TextStyle
+import os
+from pathlib import Path
+
+import yaml
+
+from dpd.models import Decision, DesignTokens, Slot, TextRun, TextStyle
+
+WEAK_LEVELS = ("master.", "theme.", "default")
+"""Уровни, с которых свойство приходит как объявление шаблона, а не как его
+фактическая разметка. Тема расходится с оформлением во всех четырёх
+проверенных шаблонах, а мастер её повторяет."""
+
+CONFIG_ENV = "DPD_LAYOUT_CONFIG"
+DEFAULT_CONFIG = Path(__file__).resolve().parents[3] / "configs" / "layout.yaml"
+DEFAULT_RULE = "markup"
+
+
+def conflict_rule() -> str:
+    """Чему верить при расхождении: `markup` или `template`.
+
+    Правило — данные, а не код: пользователь вправе решить иначе, и правка
+    не должна требовать изменений в исходниках.
+    """
+    path = Path(os.environ.get(CONFIG_ENV) or DEFAULT_CONFIG)
+    if not path.is_file():
+        return DEFAULT_RULE
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return str(raw.get("conflict_rule", DEFAULT_RULE))
+
+
+def _declared(level: str | None) -> bool:
+    """Пришло ли свойство с уровня объявления, а не разметки."""
+    return bool(level) and level.startswith(WEAK_LEVELS)
 
 TITLE_SCALE_POSITION = 0.75
 """Доля шкалы снизу, откуда берётся кегль заголовка, если слот его не знает."""
 
 
-def style_for(slot: Slot, tokens: DesignTokens | None, size_shift: int = 0) -> TextStyle:
+def style_for(
+    slot: Slot,
+    tokens: DesignTokens | None,
+    size_shift: int = 0,
+    decisions: list[Decision] | None = None,
+    rule: str | None = None,
+) -> TextStyle:
     """Оформление для содержимого слота: из слота, с опорой на токены.
 
     `size_shift` сдвигает кегль на ступени шкалы шаблона — так выражается
@@ -29,10 +67,49 @@ def style_for(slot: Slot, tokens: DesignTokens | None, size_shift: int = 0) -> T
     пожаловался бы.
     """
     base = slot.text_style
-    font = _font_within_template(base.font if base else None, tokens)
+    rule = rule or conflict_rule()
+    записать = decisions if decisions is not None else []
+
+    # Свойство, доставшееся с уровня мастера или темы, слабее частотного
+    # токена: это объявление шаблона, а не то, чем он набран. В VK Tech
+    # Arial встречается один раз из 774 прогонов — и попадал в основной
+    # текст именно так.
+    объявленный_шрифт = base.font if base else None
+    объявленный_кегль = base.size_pt if base else None
+    слабый_шрифт = rule == "markup" and _declared(base.font_resolved_from if base else None)
+    слабый_кегль = rule == "markup" and _declared(base.resolved_from if base else None)
+
+    font = _font_within_template(None if слабый_шрифт else объявленный_шрифт, tokens)
     colour = base.color if base and base.color else _primary_colour(tokens)
-    size = _snap_to_scale(base.size_pt if base else None, slot, tokens)
+    size = _snap_to_scale(None if слабый_кегль else объявленный_кегль, slot, tokens)
     size = _shift_by_steps(size, tokens, size_shift)
+
+    if слабый_шрифт and объявленный_шрифт and font and font != объявленный_шрифт:
+        записать.append(
+            Decision(
+                kind="font",
+                slot_id=slot.id,
+                chosen=font,
+                declared=объявленный_шрифт,
+                reason=(
+                    f"шаблон объявляет {объявленный_шрифт} на уровне мастера, "
+                    f"но набран {font}: система следует разметке"
+                ),
+            )
+        )
+    if слабый_кегль and объявленный_кегль and size and size != объявленный_кегль:
+        записать.append(
+            Decision(
+                kind="size",
+                slot_id=slot.id,
+                chosen=f"{size:g} pt",
+                declared=f"{объявленный_кегль:g} pt",
+                reason=(
+                    f"кегль {объявленный_кегль:g} pt унаследован от мастера; "
+                    f"взята ступень шкалы шаблона {size:g} pt"
+                ),
+            )
+        )
 
     return TextStyle(
         font=font,

@@ -88,6 +88,24 @@ class Compensation(Contract):
     reason: str = ""
 
 
+class Decision(Contract):
+    """Выбор, сделанный системой там, где однозначного значения не было.
+
+    Система не вправе молча менять оформление: она называет, что выбрала, из
+    чего и почему. Без этой записи пользователь узнаёт о подмене, только
+    открыв выгруженный файл в редакторе.
+
+    `declared` — то, что объявляет сам шаблон; на него можно переключиться
+    правилом в `configs/layout.yaml`.
+    """
+
+    kind: Literal["font", "size"]
+    slot_id: str
+    chosen: str
+    declared: str
+    reason: str
+
+
 class Slide(Contract):
     """Слайд, собранный на макете шаблона."""
 
@@ -110,3 +128,4 @@ class RenderedPresentation(Contract):
     template_hash: str
     canvas: Canvas
     slides: list[Slide] = Field(default_factory=list)
+    decisions: list[Decision] = Field(default_factory=list)

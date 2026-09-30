@@ -204,6 +204,18 @@ if result is not None:
         f"Выгружен вариант {result.chosen.variant}."
     )
 
+    if result.chosen.decisions:
+        # Система не вправе молча менять оформление: она называет, что
+        # выбрала и что объявляет сам шаблон. Подробности свёрнуты — человек
+        # пришёл делать презентацию, а не разбираться в наследовании стилей.
+        with st.expander(f"Система приняла решений за вас: {len(result.chosen.decisions)}"):
+            for decision in result.chosen.decisions:
+                st.markdown(f"- {decision.reason} (в шаблоне объявлено: {decision.declared})")
+            st.caption(
+                "Переключить правило можно в configs/layout.yaml: "
+                "`conflict_rule: template` заставит следовать объявлению шаблона."
+            )
+
     for key, path in result.exports.items():
         st.download_button(
             f"Скачать {key.upper()} — {path.name}",
