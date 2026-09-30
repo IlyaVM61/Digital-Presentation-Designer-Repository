@@ -67,10 +67,10 @@ cp .env.example .env
 # Веб-интерфейс
 D:\venvs\dpd\Scripts\streamlit run ui/app.py
 
-# Пакетная генерация девяти демонстрационных колод
-D:\venvs\dpd\Scripts\python scripts/generate_all.py \
-    --templates ./assets/templates/calibration \
-    --content ./assets/content-pack
+# Девять демонстрационных колод одной командой: шаблоны из configs/decks.yaml,
+# результат в $DPD_OUTPUT_DIR/out — decks/ (pptx, pdf, html) и audit/
+# Пока содержание — план колоды, написанный человеком; вход по брифу появится с T-49
+D:\venvs\dpd\Scripts\python -m dpd.batch --outline ПЛАН.txt
 
 # Тесты
 D:\venvs\dpd\Scripts\pytest
