@@ -6,9 +6,13 @@
 растром. Текст остаётся текстом, таблицы и диаграммы — объектами
 PowerPoint. Проверяется тестом, а не на глаз.
 
-Реализован экспорт в `.pptx` (T-08). HTML и PDF — задачи T-36 и T-37.
+Реализованы `.pptx` (T-08) и `.pdf` (T-36). HTML — задача T-37.
+
+PDF делается из уже выгруженного `.pptx`, а не из контракта вёрстки: так он
+показывает ровно то, что получит пользователь, открыв колоду в PowerPoint.
 """
 
+from dpd.export.pdf_exporter import export_pdf
 from dpd.export.pptx_exporter import export_pptx
 
-__all__ = ["export_pptx"]
+__all__ = ["export_pdf", "export_pptx"]
