@@ -126,15 +126,26 @@ def run_pipeline(
 
     exports: dict[str, Path] = {}
     images: list[Path] = []
+    done = 0
+    base = f"{template_path.stem}-{chosen.variant}"
+    deck_pptx: Path | None = None
+
     with _timed(timings, "export"):
-        report_progress("export", 0, len(formats))
-        deck_pptx = export_pptx(chosen, schema, template_path, out_dir / f"{template_path.stem}-{chosen.variant}.pptx")
-        exports["pptx"] = deck_pptx
-        report_progress("export", 1, len(formats))
+        report_progress("export", done, len(formats))
+        # `.pptx` нужен сам по себе и как единственный источник конвертации в
+        # PDF и в превью. Если его не просили и конвертировать нечего, он не
+        # собирается вовсе: снятая галочка должна что-то значить, а лишняя
+        # работа — стоить времени бюджета.
+        if {"pptx", "pdf"} & set(formats) or previews:
+            deck_pptx = export_pptx(chosen, schema, template_path, out_dir / f"{base}.pptx")
+        if "pptx" in formats and deck_pptx is not None:
+            exports["pptx"] = deck_pptx
+            done += 1
+            report_progress("export", done, len(formats))
 
     # Конвертация одна на прогон: её результат нужен и превью, и PDF.
     pdf_source: Path | None = None
-    if previews or "pdf" in formats:
+    if deck_pptx is not None and (previews or "pdf" in formats):
         with _timed(timings, "render"):
             report_progress("render", 0, 1)
             pdf_source = convert_to_pdf(deck_pptx, out_dir)
@@ -143,15 +154,12 @@ def run_pipeline(
             report_progress("render", 1, 1)
 
     with _timed(timings, "export", add=True):
-        done = 1
-        if "pdf" in formats:
-            exports["pdf"] = export_pdf(
-                deck_pptx, out_dir / f"{deck_pptx.stem}.pdf", source_pdf=pdf_source
-            )
+        if "pdf" in formats and deck_pptx is not None:
+            exports["pdf"] = export_pdf(deck_pptx, out_dir / f"{base}.pdf", source_pdf=pdf_source)
             done += 1
             report_progress("export", done, len(formats))
         if "html" in formats:
-            exports["html"] = export_html(chosen, schema, out_dir / f"{deck_pptx.stem}.html")
+            exports["html"] = export_html(chosen, schema, out_dir / f"{base}.html")
             done += 1
             report_progress("export", done, len(formats))
         report_progress("export", len(formats), len(formats))

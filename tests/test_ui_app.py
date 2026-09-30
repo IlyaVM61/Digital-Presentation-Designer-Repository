@@ -130,6 +130,44 @@ def test_scenario_runs_from_file_to_exported_files(app: AppTest) -> None:
     assert any("html" in name.lower() for name in имена)
 
 
+def test_results_survive_a_download_click(app: AppTest) -> None:
+    """Скачивание одного файла не уносит со страницы остальные.
+
+    Нажатие «Скачать» перезапускает страницу — в Streamlit это такое же
+    действие, как любое другое. Пока итог жил внутри обработчика кнопки
+    «Собрать», после первого же скачивания исчезали и остальные кнопки, и
+    отчёт аудита: пользователь получал один файл из трёх и пустую страницу.
+    """
+    upload(app, template_file())
+    app.text_area[0].set_value(OUTLINE)
+    for checkbox in app.checkbox:
+        checkbox.set_value(any(fmt in checkbox.label.lower() for fmt in ("pptx", "html")))
+    app.button[0].click().run()
+
+    было = len(app.download_button)
+    assert было >= 2
+
+    app.download_button[0].click().run()
+
+    assert not app.exception
+    assert len(app.download_button) == было, "после скачивания кнопки пропали"
+    assert app.success, "отчёт о прогоне исчез со страницы"
+
+
+def test_theme_font_conflict_is_shown(app: AppTest) -> None:
+    """Расхождение темы с разметкой видно пользователю.
+
+    Тема файла врёт во всех четырёх проверенных шаблонах: объявляет Arial
+    при фактическом Play. На этом основано решение системы поверить
+    разметке, и основание надо показывать, а не прятать.
+    """
+    upload(app, template_file())
+
+    диагностика = " ".join(item.value for item in app.markdown)
+    assert "Play" in диагностика
+    assert "Arial" in диагностика, "объявление темы не показано"
+
+
 def test_timings_are_shown_after_the_run(app: AppTest) -> None:
     """Время этапов видно пользователю: бюджет ТЗ — пять минут на цикл."""
     upload(app, template_file())

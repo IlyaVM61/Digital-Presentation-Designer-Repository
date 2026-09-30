@@ -66,12 +66,17 @@ def diagnose(template_bytes: bytes, name: str) -> dict[str, object]:
 
     schema = parse_template(path)
     tokens = schema.design_tokens
+    leading = tokens.fonts[0] if tokens and tokens.fonts else None
     return {
         "path": path,
         "layouts": len(schema.layouts),
         "slots": sum(len(layout.slots) for layout in schema.layouts),
-        "font": tokens.fonts[0].family if tokens and tokens.fonts else "не определена",
-        "font_confidence": tokens.fonts[0].confidence if tokens and tokens.fonts else 0.0,
+        "font": leading.family if leading else "не определена",
+        "font_confidence": leading.confidence if leading else 0.0,
+        # Тема файла расходится с оформлением во всех четырёх проверенных
+        # шаблонах. Расхождение показывается: по нему видно, на чём основано
+        # решение системы поверить разметке, а не объявлению темы.
+        "theme_fonts": sorted(set(leading.conflicts_with.values())) if leading else [],
         "colors": [token.value for token in tokens.colors[:6]] if tokens else [],
         "scale": tokens.type_scale.values[:8] if tokens else [],
         "strategy": schema.markup_quality.strategy,
@@ -95,10 +100,16 @@ if uploaded is not None:
     st.subheader("Что удалось прочитать в шаблоне")
     left, right = st.columns(2)
     with left:
+        тема = (
+            f"тема файла объявляет {', '.join(report['theme_fonts'])} — "
+            "система поверила разметке"
+            if report["theme_fonts"]
+            else "тема файла с разметкой согласна"
+        )
         st.markdown(
             f"**Макетов:** {report['layouts']}, слотов в них {report['slots']}  \n"
             f"**Ведущая гарнитура:** {report['font']} "
-            f"(уверенность {report['font_confidence']:.2f})  \n"
+            f"(уверенность {report['font_confidence']:.2f}); {тема}  \n"
             f"**Стратегия разбора:** {report['strategy']}, качество разметки {report['quality']:.2f}"
         )
     with right:
@@ -115,11 +126,12 @@ if uploaded is not None:
 st.subheader("План колоды")
 st.caption(
     "Строка без знака — заголовок слайда, строка со знаком «-» — его пункт. "
-    "Генерация плана по свободному брифу появится задачей T-49; пока смысл приносите вы."
+    "Пока содержание пишете вы: генерация плана по свободному брифу появится позже."
 )
 outline = st.text_area("План", value=PLACEHOLDER_OUTLINE, height=200, label_visibility="collapsed")
 
-st.subheader("Что выгрузить")
+st.subheader("Форматы выгрузки")
+st.caption(f"Готовые файлы сохраняются в {output_dir()} и предлагаются к скачиванию.")
 columns = st.columns(len(FORMATS) + 1)
 chosen_formats = [
     key
@@ -158,39 +170,49 @@ if st.button("Собрать колоду", type="primary"):
             )
         except Exception as error:  # noqa: BLE001 — пользователю нужна причина, а не трассировка
             bar.empty()
+            st.session_state.pop("result", None)
             st.error(f"Прогон не удался: {error}")
         else:
             bar.progress(1.0, text="Готово")
-            st.success(f"Колода готова за {time.perf_counter() - started:.1f} с")
+            # Итог кладётся в состояние страницы, а не показывается здесь же:
+            # нажатие «Скачать» — тоже действие, страница перезапускается, и
+            # вместе с ней исчезли бы и остальные кнопки, и отчёт аудита.
+            st.session_state["result"] = result
+            st.session_state["seconds"] = time.perf_counter() - started
 
-            st.markdown(
-                "**Время по этапам:** "
-                + ", ".join(
-                    f"{STAGE_TITLES.get(stage, stage)} — {seconds:.1f} с"
-                    for stage, seconds in result.timings.items()
-                )
-            )
+result = st.session_state.get("result")
+if result is not None:
+    st.divider()
+    st.success(f"Колода готова за {st.session_state.get('seconds', 0.0):.1f} с")
 
-            находки = sum(len(report_.findings) for report_ in result.reports.values())
-            исправлено = sum(
-                len([item for item in report_.findings if item.status == "autofixed"])
-                for report_ in result.reports.values()
-            )
-            st.markdown(
-                f"**Аудит:** собрано вариантов {len(result.variants)}, "
-                f"находок {находки}, из них исправлено автоматически {исправлено}. "
-                f"Выгружен вариант {result.chosen.variant}."
-            )
+    st.markdown(
+        "**Время по этапам:** "
+        + ", ".join(
+            f"{STAGE_TITLES.get(stage, stage)} — {seconds:.1f} с"
+            for stage, seconds in result.timings.items()
+        )
+    )
 
-            for key, path in result.exports.items():
-                st.download_button(
-                    f"Скачать {key.upper()} — {path.name}",
-                    data=path.read_bytes(),
-                    file_name=path.name,
-                    mime=MIME.get(key, "application/octet-stream"),
-                )
+    находки = sum(len(report_.findings) for report_ in result.reports.values())
+    исправлено = sum(
+        len([item for item in report_.findings if item.status == "autofixed"])
+        for report_ in result.reports.values()
+    )
+    st.markdown(
+        f"**Аудит:** собрано вариантов {len(result.variants)}, "
+        f"находок {находки}, из них исправлено автоматически {исправлено}. "
+        f"Выгружен вариант {result.chosen.variant}."
+    )
 
-            if result.previews:
-                st.subheader("Превью слайдов")
-                for image in result.previews:
-                    st.image(str(image))
+    for key, path in result.exports.items():
+        st.download_button(
+            f"Скачать {key.upper()} — {path.name}",
+            data=path.read_bytes(),
+            file_name=path.name,
+            mime=MIME.get(key, "application/octet-stream"),
+        )
+
+    if result.previews:
+        st.subheader("Превью слайдов")
+        for image in result.previews:
+            st.image(str(image))

@@ -130,6 +130,19 @@ def test_html_export_needs_no_libreoffice(template: Path, out_dir: Path) -> None
     assert "Итоги пилота" in result.exports["html"].read_text(encoding="utf-8")
 
 
+def test_only_requested_formats_are_offered(template: Path, out_dir: Path) -> None:
+    """Выгружается ровно то, что попросили.
+
+    `.pptx` собирается всегда — он основа колоды и источник для конвертации
+    в PDF, — но попадать в выдачу он не должен, если его не просили.
+    Пользователь снял галочку PowerPoint и всё равно получал файл: интерфейс
+    обещал выбор, которого не было.
+    """
+    result = run_pipeline(template, structure_from_outline(OUTLINE), out_dir / "formats", formats=("html",))
+
+    assert set(result.exports) == {"html"}
+
+
 def test_libreoffice_is_started_once_for_previews_and_pdf(
     template: Path, out_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
