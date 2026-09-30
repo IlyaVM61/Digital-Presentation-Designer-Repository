@@ -87,6 +87,7 @@ class Revision:
     находка исчезла раньше, чем до неё дошла очередь.
     """
 
+    variant: str = ""
     applied: list[Choice] = field(default_factory=list)
     rejected: list[Choice] = field(default_factory=list)
     skipped: list[Choice] = field(default_factory=list)
@@ -228,7 +229,7 @@ def revise(result: RunResult, variant: str, choices: Mapping[int, str]) -> RunRe
     зависит от всех трёх.
     """
     if not choices:
-        return replace(result, revision=Revision())
+        return replace(result, revision=Revision(variant=variant))
     if result.template_path is None or result.structure is None or result.out_dir is None:
         raise ValueError("прогон не сохранил своих входов — исправлять не по чему")
 
@@ -267,6 +268,7 @@ def revise(result: RunResult, variant: str, choices: Mapping[int, str]) -> RunRe
         distinction=check_variant_distinction(variants, result.template),
         remedies={**result.remedies, variant: options(replace(context, deck=repaired.deck), fresh)},
         revision=Revision(
+            variant=variant,
             applied=outcome.applied,
             rejected=outcome.rejected,
             skipped=outcome.skipped,

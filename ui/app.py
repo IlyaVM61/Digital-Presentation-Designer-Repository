@@ -27,6 +27,12 @@ Streamlit выбран решением D6 (ADR-0005): сценарий мног
 удалены: на них держится правило «назвать свой выбор» (ADR-0006). Ошибка
 тоже объясняется фразой, а её техническая причина лежит в подробностях.
 Словарь запрещённых на виду слов — в `tests/test_ui_app.py`.
+
+**Что исправить, решает пользователь** (T-40, решение D5). Механические
+находки система исправила до показа; на виду остаются те, где способ меняет
+слайд по-своему. У каждой — только применимые действия с последствием, по
+умолчанию «оставить как есть». После исправления проверка выполняется заново,
+и файлы к скачиванию уже содержат правку.
 """
 
 from __future__ import annotations
@@ -40,9 +46,11 @@ from pathlib import Path
 
 import streamlit as st
 
+from dpd.audit.remedies import plain_title
 from dpd.generation import structure_from_outline
-from dpd.models import AuditReport
-from dpd.orchestrator import STAGE_TITLES, RunResult, run_pipeline
+from dpd.models import AuditReport, Finding
+from dpd.models.audit import SEVERITY_ORDER
+from dpd.orchestrator import STAGE_TITLES, Revision, RunResult, revise, run_pipeline
 from dpd.render import soffice_path
 
 FORMATS = [("pptx", "PowerPoint (.pptx)"), ("pdf", "PDF (.pdf)"), ("html", "HTML (.html)")]
@@ -172,6 +180,106 @@ def show_details(title: str, error: BaseException) -> None:
     """Причина сбоя — в подробностях: пригодится разработчику, а не пользователю."""
     with st.expander(title):
         st.code(f"{type(error).__name__}: {error}", language=None)
+
+
+# Критичность словами пользователя: критичное нельзя не заметить, а
+# рекомендацию не стоит выдавать за ошибку.
+SEVERITY_WORDS = {"critical": "Важно", "warning": "Стоит поправить", "advice": "Совет"}
+
+# Что сказать о замечании, для которого готового способа нет.
+NO_REMEDY = {
+    "lossy": "Готового способа нет — поправьте в PowerPoint или оставьте как есть.",
+    "semantic": "Здесь нужен другой текст — поправьте план и соберите заново.",
+    "none": "Решение за вами: система только сообщает.",
+    "mechanical": "Исправить автоматически не получилось — поправьте в PowerPoint.",
+}
+
+KEEP = "Оставить как есть"
+
+
+def where(finding: Finding) -> str:
+    return f"Слайд {finding.slide_number}" if finding.slide_number else "Вся презентация"
+
+
+def show_revision(revision: Revision) -> None:
+    """Итог исправления: что сделано и что показала повторная проверка."""
+    if revision.applied:
+        st.success(
+            f"Исправлено: {len(revision.applied)}. Проверили заново: замечаний было "
+            f"{revision.before}, стало {revision.after}. Файлы к скачиванию обновлены."
+        )
+    if revision.rejected:
+        st.warning(
+            "Не стали применять — слайд стал бы хуже, чем был: "
+            + "; ".join(
+                f"{where(choice.finding).lower()}, «{choice.remedy.title.lower()}»"
+                for choice in revision.rejected
+            )
+        )
+
+
+def choose_fixes(result: RunResult, variant: str) -> None:
+    """Замечания выбранного варианта и выбор, что с ними сделать.
+
+    Номер замечания в отчёте — ключ выбора: по нему оркестратор находит и
+    замечание, и подобранные для него способы. Ключ виджета несёт счётчик
+    исправлений, чтобы после исправления выбор начинался заново.
+    """
+    report = result.reports[variant]
+    offered = result.remedies.get(variant, {})
+    shown = sorted(
+        (
+            (index, finding)
+            for index, finding in enumerate(report.findings)
+            if finding.status != "autofixed"
+        ),
+        key=lambda item: (SEVERITY_ORDER.index(item[1].severity), item[1].slide_number or 0),
+    )
+
+    st.subheader("Что стоит поправить")
+    if result.revision is not None and result.revision.variant == variant:
+        show_revision(result.revision)
+    if not shown:
+        st.markdown("Замечаний к этому варианту нет.")
+        return
+
+    chosen: dict[int, str] = {}
+    for index, finding in shown:
+        title = plain_title(finding)
+        label = f"{SEVERITY_WORDS[finding.severity]}. {where(finding)}: {title[:1].lower()}{title[1:]}"
+        remedies = offered.get(index, [])
+        if not remedies:
+            st.markdown(f"- {label}. {NO_REMEDY.get(finding.fixability, NO_REMEDY['none'])}")
+            continue
+        answer = st.radio(
+            label,
+            [KEEP, *(item.title for item in remedies)],
+            captions=["Ничего не меняется", *(item.consequence for item in remedies)],
+            key=f"fix-{result.run_id}-{result.revisions}-{variant}-{index}",
+        )
+        if answer != KEEP:
+            chosen[index] = next(item.id for item in remedies if item.title == answer)
+
+    with st.expander("Подробности для дизайнера"):
+        for finding in report.findings:
+            mark = "исправлено автоматически: " if finding.status == "autofixed" else ""
+            st.markdown(f"- `{finding.check_id}` — {mark}{finding.message}")
+
+    if not offered:
+        return
+    if st.button("Исправить выбранное", key="apply-fixes"):
+        if not chosen:
+            st.info("Ничего не выбрано — всё осталось как есть.")
+            return
+        with st.spinner("Исправляем и проверяем заново"):
+            try:
+                revised = revise(result, variant, chosen)
+            except Exception as error:  # noqa: BLE001 — пользователю нужна причина, а не трассировка
+                st.error("Исправить не получилось. Файлы остались прежними.")
+                show_details("Подробности сбоя", error)
+                return
+        st.session_state["result"] = revised
+        st.rerun()
 
 
 def show_side_by_side(result: RunResult) -> None:
@@ -392,6 +500,8 @@ if result is not None:
                 + ". Переключить правило можно в configs/layout.yaml: "
                 "`conflict_rule: template` заставит следовать объявлению шаблона."
             )
+
+    choose_fixes(result, выбран)
 
     # Файлы всех трёх вариантов готовы с прогона: выбор переключает кнопки,
     # а не запускает сборку заново.
