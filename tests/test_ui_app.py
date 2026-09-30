@@ -170,12 +170,14 @@ def test_theme_font_conflict_is_shown(app: AppTest) -> None:
 
 def test_timings_are_shown_after_the_run(app: AppTest) -> None:
     """Время этапов видно пользователю: бюджет ТЗ — пять минут на цикл."""
+    from dpd.orchestrator import STAGE_TITLES
+
     upload(app, template_file())
     app.text_area[0].set_value(OUTLINE)
     app.button[0].click().run()
 
     текст = " ".join(item.value for item in app.markdown)
-    assert "с" in текст and any(stage in текст for stage in ("Разбор шаблона", "Выгрузка"))
+    assert "с" in текст and any(stage in текст for stage in STAGE_TITLES.values())
 
 
 def test_empty_plan_is_refused_with_an_explanation(app: AppTest) -> None:
@@ -275,3 +277,183 @@ def test_identical_variants_are_reported_on_the_page(
     assert not app.exception, app.exception
     предупреждения = " ".join(item.value for item in app.warning)
     assert "вариант" in предупреждения.lower(), "совпадение вариантов не показано"
+
+
+# --- T-55: язык интерфейса для непрофильного пользователя ------------------
+#
+# Критерий приёмки: маркетолог проходит сценарий, не встречая жаргона вёрстки.
+# Проверяется не на глаз: сценарий проходится страницей, собирается текст,
+# видный без раскрытия подробностей, и сверяется со словарём ниже.
+#
+# Подробности при этом не удаляются, а сворачиваются: дизайнеру они нужны, и
+# на них держится правило владельца «назвать свой выбор» (ADR-0006).
+
+JARGON = {
+    "слот": r"\bслот",
+    "кегль": r"\bкегл",
+    "гарнитура": r"\bгарнитур",
+    "разметка": r"\bразметк",
+    "пункты (pt)": r"\bpt\b",
+    "мастер-слайд": r"\bмастер",
+    "наследование стилей": r"\bнаследова",
+    "токен": r"\bтокен",
+    "плейсхолдер": r"\bплейсхолдер",
+    "оси вариантов": r"\bос(?:ь|и|ей|ям|ях)\b",
+    "цветовая схема макета": r"\bцветов\w* схем",
+    "аудит": r"\bаудит",
+    "находка": r"\bнаходк",
+    "рендер": r"\bрендер",
+    "колода": r"\bколод",
+    "прогон": r"\bпрогон",
+    "уверенность": r"\bуверенност",
+    "стратегия разбора": r"\bстратеги",
+    "выгрузка": r"\bвыгрузк",
+    "путь к конфигу": r"configs[/\]|\.yaml\b",
+    "внутренний идентификатор": r"\b(?:placeholder|geometry|examples)-first\b|\bconfidence\b|\bemu\b",
+}
+"""Слова, которые маркетолог встречать не должен. «Макет» сюда не входит:
+так называет макеты слайдов сам PowerPoint."""
+
+TEXT_ELEMENTS = {"markdown", "caption", "title", "header", "subheader", "warning", "info", "success", "error"}
+
+
+def page_text(app: AppTest, *, folded: bool) -> str:
+    """Текст страницы: видный сразу (`folded=False`) или свёрнутый.
+
+    Подпись свёрнутого блока видна, его содержимое — нет. Поле плана не
+    читается вовсе: там текст самого пользователя, а не страницы.
+    """
+    from streamlit.testing.v1.element_tree import Block
+
+    части: list[str] = []
+
+    def обойти(node, внутри: bool) -> None:
+        if isinstance(node, Block):
+            if node.type == "expander":
+                if not внутри and not folded:
+                    части.append(node.label)
+                внутри = True
+            for child in node.children.values():
+                обойти(child, внутри)
+            return
+        if внутри is not folded:
+            return
+        if node.type in TEXT_ELEMENTS:
+            части.append(node.value)
+        elif node.type == "progress":
+            части.append(node.proto.text)
+        elif node.type == "radio":
+            части.extend(node.options)
+            части.extend(node.proto.captions)
+        for attr in ("label", "help"):
+            value = getattr(node, attr, None)
+            if isinstance(value, str):
+                части.append(value)
+
+    обойти(app.main, False)
+    return "\n".join(части)
+
+
+def jargon_in(text: str) -> list[str]:
+    """Найденный жаргон — с окружением, чтобы было видно, где он."""
+    import re
+
+    найдено = []
+    for name, pattern in JARGON.items():
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            начало = max(match.start() - 40, 0)
+            найдено.append(f"{name}: «…{text[начало:match.end() + 40]}…»")
+    return найдено
+
+
+def test_plain_view_has_no_layout_jargon(app: AppTest) -> None:
+    """Критерий приёмки целиком: сценарий от шаблона до скачивания.
+
+    На виду остаются диагностика шаблона, итог сборки, выбор варианта и
+    файлы. Всё это должно читаться без знания вёрстки.
+    """
+    build(app, formats=("pptx", "html"), previews=False)
+    app.radio[0].set_value("C").run()
+
+    assert not app.exception, app.exception
+    assert not jargon_in(page_text(app, folded=False))
+
+
+def test_technical_details_are_folded_not_lost(app: AppTest) -> None:
+    """Подробности для дизайнера остаются на странице, только свёрнутыми.
+
+    Стратегия разбора, шкала размеров и объявление темы — основание
+    решений системы. Спрятать их совсем значило бы решать молча.
+    """
+    from typing import get_args
+
+    from dpd.models.template import ParsingStrategy
+
+    upload(app, template_file())
+
+    assert not app.exception, app.exception
+    assert app.expander, "подробностей нет вовсе"
+    свёрнуто = page_text(app, folded=True)
+    assert any(strategy in свёрнуто for strategy in get_args(ParsingStrategy)), "стратегия разбора пропала"
+    assert "pt" in свёрнуто, "шкала размеров пропала"
+    assert "Arial" in page_text(app, folded=False) + свёрнуто, "объявление темы пропало"
+
+
+def test_similar_variants_are_explained_in_plain_words(
+    app: AppTest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Живой пример жаргона от владельца: «Работает осей: 2 из 3».
+
+    Предупреждение о похожих вариантах говорит, чем они не различаются,
+    словами пользователя. Техническая формулировка проверки остаётся
+    в подробностях.
+    """
+    import yaml
+
+    same = {"prefer_scheme": "any", "prefer_families": ["content"], "size_shift": 0}
+    config = tmp_path / "variants.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {"profiles": [{"id": key, "name": f"Вариант {key}", **same} for key in "ABC"]},
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DPD_VARIANTS_CONFIG", str(config))
+
+    build(app, formats=("html",), previews=False)
+
+    assert not app.exception, app.exception
+    assert app.warning, "совпадение вариантов не показано"
+    assert not jargon_in(page_text(app, folded=False))
+    assert "осей" in page_text(app, folded=True), "формулировка проверки пропала из подробностей"
+
+
+def test_broken_file_is_explained_not_crashed(app: AppTest) -> None:
+    """Не тот файл — фраза о том, что делать, а не трассировка Python."""
+    app.run()
+    app.file_uploader[0].upload("презентация.pptx", b"not a presentation", "application/octet-stream")
+    app.run()
+
+    assert not app.exception, "вместо объяснения — трассировка"
+    assert app.error, "интерфейс промолчал"
+    assert not jargon_in(page_text(app, folded=False))
+
+
+def test_failed_run_is_explained_plainly(app: AppTest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сбой сборки: на виду — что случилось, причина — в подробностях."""
+
+    def сбой(*args, **kwargs):
+        raise RuntimeError("soffice exited with code 1 while rendering deck")
+
+    monkeypatch.setattr("dpd.orchestrator.run_pipeline", сбой)
+    upload(app, template_file())
+    app.text_area[0].set_value(OUTLINE)
+    app.button[0].click().run()
+
+    assert not app.exception, app.exception
+    assert app.error, "сбой не показан"
+    на_виду = page_text(app, folded=False)
+    assert "soffice" not in на_виду, "текст исключения стоит на виду"
+    assert not jargon_in(на_виду)
+    assert "soffice" in page_text(app, folded=True), "причину сбоя не найти"
