@@ -246,7 +246,9 @@ def choose_fixes(result: RunResult, variant: str) -> None:
     chosen: dict[int, str] = {}
     for index, finding in shown:
         title = plain_title(finding)
-        label = f"{SEVERITY_WORDS[finding.severity]}. {where(finding)}: {title[:1].lower()}{title[1:]}"
+        # Место — в конце: часть названий сама начинается со «Слайд», и
+        # «Слайд 2: слайд заполнен…» читалось бы запинкой.
+        label = f"{SEVERITY_WORDS[finding.severity]}: {title[:1].lower()}{title[1:]} — {where(finding).lower()}"
         remedies = offered.get(index, [])
         if not remedies:
             st.markdown(f"- {label}. {NO_REMEDY.get(finding.fixability, NO_REMEDY['none'])}")
