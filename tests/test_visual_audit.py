@@ -5,10 +5,15 @@
 визуальная читаемость сверх набора ТЗ (`content.visual_readability`).
 Остальные вопросы валидации решаются по тексту (T-51) и по данным файла.
 
-**Один запрос на слайд, все вопросы разом** (критерий приёмки). Модель видит
-изображение и список того, что на слайд положила вёрстка. Замечание о
-читаемости называет номер элемента из списка, и находка получает его блок:
-подсветка покажет место, а не весь слайд.
+**Один запрос на слайд, все вопросы разом** (критерий приёмки).
+
+**Модель не судит о читаемости, а переписывает текст, который видит**, и
+помечает строки, разбираемые с трудом. Со списком того, что положила
+вёрстка, расшифровку сравнивает код: строки нет в расшифровке — её не видно.
+Так решено по двум живым прогонам: модель, которую просили судить, на
+светлом шаблоне пропускала шапку таблицы цвета заливки, а на тёмном
+выдумывала перекрытый текст там, где всё читается. Списка модель не видит —
+иначе переписала бы его, а не изображение.
 
 **Смотрится выбранный вариант** — после выбора (ADR-0002, п. 4); батч сдачи
 смотрит все. Без модели проверки названы в отчёте пропущенными.
@@ -28,8 +33,9 @@ import pytest
 from pydantic import ValidationError
 
 from dpd.audit import REGISTRY, discover
+from dpd.audit.checks.visual import check_visual_readability
 from dpd.audit.textual import attach
-from dpd.audit.visual import VISUAL_STAGE, audit_visual, look_contract, review_visual
+from dpd.audit.visual import VISUAL_STAGE, SlideLook, VisualReview, audit_visual, review_visual
 from dpd.llm import ModelClient, ModelError, ModelSettings, load_prompts
 from dpd.models import AuditReport, Finding, RenderedPresentation
 from dpd.models.common import Bounds, Canvas, TextRun
@@ -40,6 +46,13 @@ READABILITY = "content.visual_readability"
 IMAGERY = "content.irrelevant_imagery"
 
 BOX = Bounds(x=0.1, y=0.1, w=0.8, h=0.3)
+
+SEEN = {
+    1: ["Наставничество окупилось", "vk tech"],
+    2: ["Удержание выросло", "Показатель", "До", "После", "Удержание", "78%", "89%"],
+    3: ["Пар стало вдвое больше", "Пары", "100", "50", "0", "I кв.", "II кв.", "Квартал"],
+}
+"""Что модель прочитала бы на чистых слайдах `sample()`; «vk tech» — надпись шаблона."""
 
 
 def text(slot: str, *lines: str) -> RenderedElement:
@@ -89,8 +102,12 @@ def pictures(tmp_path: Path, count: int = 3) -> list[Path]:
     return paths
 
 
-def clean() -> dict:
-    return {"readability": [], "offTopicPictures": []}
+def seen(*lines: str, faint: tuple[str, ...] = (), pictures: list[dict] | None = None) -> dict:
+    """Ответ модели: прочитанные строки и картинки не по теме."""
+    return {
+        "lines": [{"text": line, "legibility": "faint" if line in faint else "clear"} for line in lines],
+        "offTopicPictures": pictures or [],
+    }
 
 
 # --- Модель-подделка --------------------------------------------------------------
@@ -110,17 +127,17 @@ def settings() -> ModelSettings:
     )
 
 
-def card(body: dict) -> dict:
-    """Карточка слайда из запроса: текстовая часть сообщения пользователя."""
+def number_of(body: dict) -> int:
     [part] = [item for item in body["messages"][1]["content"] if item["type"] == "text"]
-    return json.loads(part["text"])
+    return json.loads(part["text"])["number"]
 
 
 class Provider:
-    """Поддельный VLM: отвечает по номеру слайда из карточки.
+    """Поддельный VLM: отвечает по номеру слайда из запроса.
 
     Слайды смотрятся параллельно, и порядок запросов не определён — ответ
-    выбирается по слайду, а не по очереди.
+    выбирается по слайду, а не по очереди. Без заданного ответа модель
+    читает слайд целиком (`SEEN`).
     """
 
     def __init__(self, answers: dict[int, list[dict | str]] | None = None) -> None:
@@ -132,19 +149,25 @@ class Provider:
         body = json.loads(request.content)
         with self.lock:
             self.requests.append(body)
-            queue = self.answers.get(card(body)["number"])
-            answer = queue.pop(0) if queue else clean()
+            number = number_of(body)
+            queue = self.answers.get(number)
+            answer = queue.pop(0) if queue else seen(*SEEN[number])
         content = answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False)
         message = {"role": "assistant", "content": content}
         return httpx.Response(200, json={"choices": [{"message": message, "finish_reason": "stop"}]})
 
     def by_slide(self) -> dict[int, dict]:
-        return {card(body)["number"]: body for body in self.requests}
+        return {number_of(body): body for body in self.requests}
 
 
 def client(provider: Provider) -> ModelClient:
     prompts = load_prompts()
     return ModelClient(settings(), repair_prompt=prompts.get("skills/response-repair").text, transport=httpx.MockTransport(provider))
+
+
+def readability(deck: RenderedPresentation, *answers: dict, share: float = 0.5) -> list[Finding]:
+    review = VisualReview(slides=[SlideLook.model_validate(answer) for answer in answers])
+    return check_visual_readability(deck, review, min_seen_share=share)
 
 
 # --- Реестр -----------------------------------------------------------------------
@@ -180,72 +203,22 @@ def test_every_slide_is_looked_at_with_one_request(tmp_path: Path) -> None:
         assert image["image_url"]["url"] == "data:image/png;base64," + base64.b64encode(f"png-{number}".encode()).decode()
 
 
-def test_card_lists_what_the_layout_put_on_the_slide(tmp_path: Path) -> None:
-    """Модель сравнивает изображение со списком: текст, который есть в списке,
-    но не виден на изображении, — замечание. Без списка его не заметить."""
+def test_model_is_not_shown_the_slide_text(tmp_path: Path) -> None:
+    """Расшифровка должна быть расшифровкой изображения: со списком строк
+    перед глазами модель переписала бы список, и невидимый текст «нашёлся» бы."""
     provider = Provider()
 
     review_visual(sample(), pictures(tmp_path), client(provider), load_prompts())
 
-    slides = {number: card(body) for number, body in provider.by_slide().items()}
-    assert slides[1]["elements"] == [{"n": 1, "kind": "text", "text": ["Наставничество окупилось"]}]
-    assert slides[2]["elements"][1] == {
-        "n": 2,
-        "kind": "table",
-        "headers": ["Показатель", "До", "После"],
-        "rows": [["Удержание", "78%", "89%"]],
-    }
-    chart = slides[3]["elements"][1]
-    assert chart["categories"] == ["I кв.", "II кв."]
-    assert chart["series"] == ["Пары"]
-    assert chart["axisTitles"] == {"category": "Квартал", "value": "Пары"}
+    for body in provider.requests:
+        sent = json.dumps(body["messages"], ensure_ascii=False)
+        assert "Показатель" not in sent and "Удержание выросло" not in sent
 
 
-def unreadable(element: int, text: str, problem: str = "Не видно на заливке") -> dict:
-    return {"readability": [{"element": element, "text": text, "problem": problem}], "offTopicPictures": []}
-
-
-def test_element_number_is_constrained_by_the_schema() -> None:
-    """Номер элемента — перечисление в схеме: провайдер держит её при
-    декодировании, и замечание не укажет на блок, которого нет."""
-    slide = sample().slides[1]
-    contract = look_contract(slide)
-
-    contract.model_validate(unreadable(2, "Показатель"))
+def test_legibility_is_one_of_two_marks() -> None:
+    SlideLook.model_validate(seen("Заголовок", faint=("Заголовок",)))
     with pytest.raises(ValidationError):
-        contract.model_validate(unreadable(3, "Показатель"))
-    assert contract.model_json_schema()["$defs"]["Unreadable"]["properties"]["element"]["enum"] == [1, 2]
-
-
-def test_unreadable_text_is_quoted_from_its_element() -> None:
-    """Живой прогон v1: без цитаты модель «находила» перекрытый и обрезанный
-    текст на слайдах, где всё читается, и пропускала невидимую шапку таблицы.
-    Цитата из списка — проверяемое утверждение: строка этого блока, которую
-    на изображении не прочесть."""
-    contract = look_contract(sample().slides[1])
-
-    contract.model_validate(unreadable(2, "показатель"))
-    contract.model_validate(unreadable(2, "«78%»"))
-    with pytest.raises(ValidationError, match="нет в элементе 1"):
-        contract.model_validate(unreadable(1, "Показатель"))
-    with pytest.raises(ValidationError, match="дословно"):
-        contract.model_validate(unreadable(2, ""))
-
-
-def test_chart_scale_labels_need_no_quote() -> None:
-    """Подписи шкалы диаграмма рисует сама, в списке их нет — цитировать нечего."""
-    contract = look_contract(sample().slides[2])
-
-    contract.model_validate(unreadable(2, "", "Цифры шкалы сливаются с фоном"))
-    contract.model_validate(unreadable(2, "Квартал"))
-
-
-def test_slide_without_content_has_nothing_to_be_unreadable() -> None:
-    contract = look_contract(Slide(id="s9", layout_id="l1"))
-
-    contract.model_validate(clean())
-    with pytest.raises(ValidationError):
-        contract.model_validate(unreadable(1, "Мелко"))
+        SlideLook.model_validate({"lines": [{"text": "Заголовок", "legibility": "hidden"}], "offTopicPictures": []})
 
 
 def test_slide_failing_the_contract_stops_the_stage(tmp_path: Path) -> None:
@@ -265,27 +238,65 @@ def test_images_must_match_the_slides(tmp_path: Path) -> None:
     assert provider.requests == []
 
 
-# --- Проверки -------------------------------------------------------------------------
+# --- Читаемость ------------------------------------------------------------------------
 
 
-def test_unreadable_block_becomes_a_finding_on_that_block(tmp_path: Path) -> None:
-    problem = "Текста не видно: он того же цвета, что заливка"
-    provider = Provider({2: [unreadable(2, "Показатель", problem)]})
+def test_text_missing_from_the_image_is_a_warning_on_its_block() -> None:
+    """Шапка таблицы цвета заливки: на изображении её нет — содержимое
+    потеряно для зрителя, это тяжелее, чем «читается с трудом»."""
+    deck = sample()
+    findings = readability(deck, seen(*SEEN[1]), seen("Удержание выросло", "Удержание", "78%", "89%"), seen(*SEEN[3]))
 
-    report = audit_visual(sample(), pictures(tmp_path), client(provider), load_prompts())
-
-    [finding] = report.findings
+    [finding] = findings
     assert finding.check_id == READABILITY
-    assert (finding.check_class, finding.severity, finding.fixability) == ("model", "advice", "lossy")
+    assert (finding.check_class, finding.severity, finding.fixability) == ("model", "warning", "lossy")
     assert (finding.slide_number, finding.slot_id) == (2, "body")
-    assert problem in finding.message and "«Показатель»" in finding.message
-    assert finding.evidence["slideId"] == "s2"
-    assert finding.evidence["text"] == "Показатель"
+    assert "«Показатель», «До», «После»" in finding.message
+    assert finding.evidence == {"slideId": "s2", "element": 2, "missing": ["Показатель", "До", "После"]}
+
+
+def test_text_read_with_strain_is_advice() -> None:
+    deck = sample()
+    findings = readability(deck, seen(*SEEN[1]), seen(*SEEN[2]), seen(*SEEN[3], faint=("Пары", "Квартал")))
+
+    [finding] = findings
+    assert (finding.severity, finding.slide_number, finding.slot_id) == ("advice", 3, "body")
+    assert "«Пары», «Квартал»" in finding.message
+    assert finding.evidence["faint"] == ["Пары", "Квартал"]
+
+
+def test_text_wrapped_over_lines_counts_as_seen() -> None:
+    """Абзац на изображении переносится, и модель пишет его по строкам."""
+    deck = sample()
+
+    assert readability(deck, seen("Наставничество", "окупилось"), seen(*SEEN[2]), seen(*SEEN[3])) == []
+
+
+def test_small_reading_slips_do_not_make_text_unseen() -> None:
+    """Расшифровка неточна — «е» вместо «ё», потерянная кавычка, слово
+    с ошибкой. Строка считается увиденной, если прочитана хотя бы доля слов
+    из `configs/audit.yaml`."""
+    deck = sample()
+    slipped = seen("Пар стало вдвое бальше", *SEEN[3][1:])
+
+    assert readability(deck, seen(*SEEN[1]), seen(*SEEN[2]), slipped) == []
+    assert readability(deck, seen(*SEEN[1]), seen(*SEEN[2]), slipped, share=1.0) != []
+
+
+def test_template_text_is_not_ours_to_check() -> None:
+    """Надпись шаблона в расшифровке не проверяется: проверка ищет то, что
+    сделали мы (правило 12)."""
+    deck = sample()
+
+    assert readability(deck, seen(*SEEN[1], faint=("vk tech",)), seen(*SEEN[2]), seen(*SEEN[3])) == []
+
+
+# --- Картинки и подслой целиком --------------------------------------------------------
 
 
 def test_picture_off_the_topic_is_a_warning(tmp_path: Path) -> None:
     picture = {"shows": "пляж с пальмами", "why": "слайд о числе пар наставников"}
-    provider = Provider({3: [{"readability": [], "offTopicPictures": [picture]}]})
+    provider = Provider({3: [seen(*SEEN[3], pictures=[picture])]})
 
     report = audit_visual(sample(), pictures(tmp_path), client(provider), load_prompts())
 
@@ -340,10 +351,9 @@ def test_visual_report_goes_after_the_variant_findings(tmp_path: Path) -> None:
     )
     assert {IMAGERY, READABILITY} <= set(variant.checks_skipped)
 
-    problem = "Подписи осей сливаются с фоном"
-    provider = Provider({3: [unreadable(2, "Квартал", problem)]})
-    seen = attach(variant, audit_visual(sample(), pictures(tmp_path), client(provider), load_prompts()), sample())
+    provider = Provider({3: [seen(*SEEN[3], faint=("Квартал",))]})
+    looked = attach(variant, audit_visual(sample(), pictures(tmp_path), client(provider), load_prompts()), sample())
 
-    assert [f.check_id for f in seen.findings] == ["density.too_many_bullets", READABILITY]
-    assert {IMAGERY, READABILITY} <= set(seen.checks_run)
-    assert not {IMAGERY, READABILITY} & set(seen.checks_skipped)
+    assert [f.check_id for f in looked.findings] == ["density.too_many_bullets", READABILITY]
+    assert {IMAGERY, READABILITY} <= set(looked.checks_run)
+    assert not {IMAGERY, READABILITY} & set(looked.checks_skipped)
