@@ -35,7 +35,13 @@ from pydantic import ValidationError
 from dpd.audit import REGISTRY, discover
 from dpd.audit.checks.visual import check_visual_readability
 from dpd.audit.textual import attach
-from dpd.audit.visual import VISUAL_STAGE, SlideLook, VisualReview, audit_visual, review_visual
+from dpd.audit.visual import (
+    VISUAL_STAGE,
+    SlideLook,
+    VisualReview,
+    audit_visual,
+    review_visual,
+)
 from dpd.llm import ModelClient, ModelError, ModelSettings, load_prompts
 from dpd.models import AuditReport, Finding, RenderedPresentation
 from dpd.models.common import Bounds, Canvas, TextRun
