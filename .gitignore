@@ -9,6 +9,15 @@
 assets/templates/calibration/*.pptx
 assets/templates/calibration/*.potx
 
+# Материалы второго хакатона — «ИИ-помощник для подготовки презентаций»:
+# корпоративный шаблон, пример шаблона с именованными полями и инструкция
+# к нему. Выданы организаторами, разрешения на публикацию нет. Игнорируется
+# всё, кроме README, — в каком бы формате файл ни пришёл (.pptx, .potx,
+# .docx, .pdf, .xlsx). Правило добавлено раньше самих файлов: GitDoc
+# отправляет каждое сохранение в публичный репозиторий сразу.
+assets/templates/corporate/*
+!assets/templates/corporate/README.md
+
 # Происхождение и лицензия не подтверждены (вопрос T6 в open-questions.md):
 # файл скачан как шаблон SlidesCarnival, но метаданные указывают на Canva.
 assets/templates/edge-cases/*.pptx
