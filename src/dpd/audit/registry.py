@@ -36,7 +36,7 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 
@@ -52,6 +52,10 @@ from dpd.models import (
     TemplateSchema,
 )
 from dpd.models.audit import SEVERITY_ORDER
+
+if TYPE_CHECKING:
+    from dpd.audit.textual import TextReview
+    from dpd.generation import ContentPack
 
 CHECKS_PACKAGE = "dpd.audit.checks"
 
@@ -145,6 +149,12 @@ class AuditContext:
     pptx_path: Path | None = None
     images: list[Path] | None = None
     environment: dict[str, Any] | None = None
+    content_pack: ContentPack | None = None
+    """Бриф и фактура: по ним аудит текста прослеживает числа слайдов (T-51)."""
+    review: TextReview | None = None
+    """Ответ модели на смысловые вопросы о тексте колоды — один запрос на
+    колоду, проверки 4a читают из него свою часть (T-51). Без модели его нет,
+    и смысловые проверки пропускаются."""
 
     def available(self) -> dict[str, Any]:
         """Входы, которыми контекст располагает сейчас."""

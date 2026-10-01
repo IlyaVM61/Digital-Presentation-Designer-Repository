@@ -245,7 +245,7 @@ def _untraced_numbers(content: SlideContent, numbers: dict[str, set[str]]) -> li
     """Числа слайда, которых нет в разделах, на которые он ссылается."""
     cited = set().union(*(numbers[anchor] for anchor in content.source_refs))
     problems: list[str] = []
-    for where, text in _texts(content):
+    for where, text in slide_texts(content):
         for raw in NUMBER.findall(text):
             number = canonical(raw)
             if number in cited:
@@ -267,9 +267,14 @@ def _untraced_numbers(content: SlideContent, numbers: dict[str, set[str]]) -> li
     return problems
 
 
-def _texts(content: SlideContent) -> list[tuple[str, str]]:
-    """Всё, что увидит зритель или проверит аудит, с путём к полю в ответе."""
-    texts = [("headline", content.headline), ("keyMessage", content.key_message)]
+def slide_texts(content: SlideContent | StructureSlide) -> list[tuple[str, str]]:
+    """Всё, что увидит зритель или проверит аудит, с путём к полю в ответе.
+
+    Принимает и ответ модели, и слайд замысла: аудит текста (T-51) сверяет
+    числа тем же обходом, что и контракт генерации, — иначе они разошлись бы
+    в том, что считать текстом слайда.
+    """
+    texts = [("headline", content.headline), ("keyMessage", content.key_message or "")]
     if content.body:
         texts += [(f"body.items[{n}]", item) for n, item in enumerate(content.body.items)]
 
