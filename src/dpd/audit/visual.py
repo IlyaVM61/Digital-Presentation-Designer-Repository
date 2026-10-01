@@ -7,18 +7,19 @@
 добавить к задаче ошибки распознавания (`audit-architecture.md`).
 
 **Один запрос на слайд, все вопросы разом**, в несколько потоков — как в
-бюджете `models-strategy.md`. Модель видит изображение и список того, что на
-слайд положила вёрстка: текст, который есть в списке, но не виден на
-изображении, без списка не заметить. Замечание о читаемости называет номер
-элемента — перечисление в схеме ответа, — и находка получает его блок:
-подсветка покажет место, а не весь слайд.
+бюджете `models-strategy.md`.
 
-**Нечитаемый текст цитируется из списка дословно**, и контракт сверяет
-цитату с текстом этого элемента. Живой прогон без цитаты (промпт v1) дал
-худшее из двух: на тёмном шаблоне модель «находила» перекрытый и обрезанный
-текст там, где всё читается, а на светлом пропустила шапку таблицы цвета
-заливки. Цитата превращает замечание в проверяемое утверждение. Без неё —
-только подписи шкалы диаграммы: их рисует сама диаграмма, в списке их нет.
+**О читаемости модель не судит, а переписывает текст, который видит**, и
+помечает строки, разбираемые с трудом. С тем, что положила вёрстка,
+расшифровку сравнивает код (`checks/visual.py`): строки нет в расшифровке —
+зритель её не увидит. Так решено по двум живым прогонам, где модель просили
+судить. С вопросом «что здесь нечитаемо» она на светлом шаблоне пропустила
+шапку таблицы цвета заливки, ответив пустыми списками за секунду, а на
+тёмном выдумала перекрытый и обрезанный текст там, где всё читается.
+Переписать видимое — задача, в которой VLM сильна, и проверяемая.
+
+**Списка строк модель не видит** — иначе переписала бы его, а не
+изображение, и невидимый текст «нашёлся» бы.
 
 **Смотрится вариант, который выбран, — после выбора** (ADR-0002, п. 4).
 С T-39 вариант выбирают, посмотрев на все три, и прогон модель не зовёт:
@@ -39,16 +40,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, create_model
-
-from pydantic import model_validator
+from pydantic import Field
 
 from dpd.audit.registry import AuditContext, run_checks
-from dpd.audit.textual import plain
 from dpd.llm import ModelClient, PromptSet
 from dpd.models import AuditReport, RenderedPresentation
 from dpd.models.common import Contract
-from dpd.models.rendered import RenderedElement, Slide
+from dpd.models.rendered import RenderedElement
 
 PROMPT = "skills/visual-auditor"
 VISUAL_STAGE = "Проверка вида слайдов"
@@ -58,12 +56,11 @@ DEFAULT_WORKERS = 4
 # --- Контракт ответа --------------------------------------------------------------
 
 
-class Unreadable(Contract):
-    """Текст элемента, который на изображении не прочесть: дословно из списка."""
+class SeenLine(Contract):
+    """Строка, прочитанная на изображении, и как она читается."""
 
-    element: int
     text: str
-    problem: str = Field(min_length=1)
+    legibility: Literal["clear", "faint"]
 
 
 class OffTopicPicture(Contract):
@@ -74,13 +71,9 @@ class OffTopicPicture(Contract):
 
 
 class SlideLook(Contract):
-    """Ответ модели об одном слайде: пустые списки — замечаний нет.
+    """Ответ модели об одном слайде."""
 
-    Списки, а не «да/нет»: в аудите текста модель путала, что значит
-    `ok: false` (T-51), а перечислить увиденное ей проще.
-    """
-
-    readability: list[Unreadable]
+    lines: list[SeenLine]
     off_topic_pictures: list[OffTopicPicture]
 
 
@@ -91,49 +84,11 @@ class VisualReview:
     slides: list[SlideLook]
 
 
-def look_contract(slide: Slide) -> type[SlideLook]:
-    """Контракт ответа о слайде: номер элемента — перечисление в схеме.
-
-    Провайдер держит схему при декодировании (T-47), и замечание не укажет на
-    блок, которого на слайде нет. У слайда без содержимого читать нечего.
-    """
-    numbers = tuple(range(1, len(slide.elements) + 1))
-    if not numbers:
-        return create_model(  # type: ignore[call-overload]
-            "SlideLook", __base__=SlideLook, readability=(list[Unreadable], Field(max_length=0))
-        )
-    texts = {number: [plain(text) for text in element_texts(element)] for number, element in enumerate(slide.elements, start=1)}
-    charts = {number for number, element in enumerate(slide.elements, start=1) if element.chart is not None}
-
-    def check(look: SlideLook) -> SlideLook:
-        # Правило вне схемы: его держит не провайдер, а повтор клиента.
-        problems: list[str] = []
-        for issue in look.readability:
-            quote = plain(issue.text)
-            if not quote and issue.element not in charts:
-                problems.append(
-                    f"readability: у элемента {issue.element} нужна строка из списка дословно — "
-                    "без цитаты можно только о подписях шкалы диаграммы"
-                )
-            elif quote and not any(quote in text for text in texts[issue.element]):
-                problems.append(
-                    f"readability: «{issue.text}» нет в элементе {issue.element} — нужна его строка из списка дословно"
-                )
-        if problems:
-            raise ValueError("; ".join(problems))
-        return look
-
-    unreadable = create_model("Unreadable", __base__=Unreadable, element=(Literal[numbers], ...))  # type: ignore[valid-type]
-    return create_model(
-        "SlideLook",
-        __base__=SlideLook,
-        __validators__={"quoted_from_elements": model_validator(mode="after")(check)},
-        readability=(list[unreadable], ...),  # type: ignore[valid-type]
-    )
-
-
 def element_texts(element: RenderedElement) -> list[str]:
-    """Строки элемента в карточке: текст, ячейки таблицы, подписи диаграммы."""
+    """Строки, которые элемент выводит на слайд: текст, ячейки таблицы, подписи диаграммы.
+
+    Цифры шкал диаграмма рисует сама, в данных колоды их нет — и сверять их не с чем.
+    """
     if element.table is not None:
         return [*element.table.headers, *(cell for row in element.table.rows for cell in row)]
     if element.chart is not None:
@@ -141,26 +96,6 @@ def element_texts(element: RenderedElement) -> list[str]:
         titles = chart.axis_titles
         return [*chart.categories, *(series.name for series in chart.series), *filter(None, (titles.category, titles.value))]
     return [run.text for run in element.runs if run.text.strip()]
-
-
-def elements_card(slide: Slide) -> list[dict]:
-    """Что вёрстка положила на слайд — то, с чем модель сравнивает изображение."""
-    return [_element(number, element) for number, element in enumerate(slide.elements, start=1)]
-
-
-def _element(number: int, element: RenderedElement) -> dict:
-    item: dict = {"n": number, "kind": element.kind}
-    if element.table is not None:
-        item["headers"] = list(element.table.headers)
-        item["rows"] = [list(row) for row in element.table.rows]
-    elif element.chart is not None:
-        chart = element.chart
-        item["categories"] = list(chart.categories)
-        item["series"] = [series.name for series in chart.series]
-        item["axisTitles"] = chart.axis_titles.model_dump(by_alias=True, exclude_none=True)
-    else:
-        item["text"] = [run.text for run in element.runs if run.text.strip()]
-    return item
 
 
 # --- Запрос к модели ----------------------------------------------------------------
@@ -187,21 +122,17 @@ def review_visual(
         )
     system = prompts.get(PROMPT).text
 
-    def ask(number: int, slide: Slide, image: Path) -> SlideLook:
-        card = {"number": number, "elements": elements_card(slide)}
+    def ask(number: int, image: Path) -> SlideLook:
         return client.complete(
             system,
-            json.dumps(card, ensure_ascii=False),
-            look_contract(slide),
+            json.dumps({"number": number}),
+            SlideLook,
             stage=VISUAL_STAGE,
             images=[Path(image).read_bytes()],
         )
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [
-            pool.submit(ask, number, slide, image)
-            for number, (slide, image) in enumerate(zip(deck.slides, images, strict=True), start=1)
-        ]
+        futures = [pool.submit(ask, number, image) for number, image in enumerate(images, start=1)]
 
     errors = [error for future in futures if (error := future.exception()) is not None]
     if errors:
@@ -241,12 +172,10 @@ __all__ = [
     "PROMPT",
     "VISUAL_STAGE",
     "OffTopicPicture",
+    "SeenLine",
     "SlideLook",
-    "Unreadable",
     "VisualReview",
     "audit_visual",
     "element_texts",
-    "elements_card",
-    "look_contract",
     "review_visual",
 ]

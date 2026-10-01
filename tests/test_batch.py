@@ -242,7 +242,7 @@ def fake_model(request: httpx.Request) -> httpx.Response:
     """
     body = json.loads(request.content)
     if body["response_format"]["json_schema"]["name"] == "SlideLook":
-        content = {"readability": [], "offTopicPictures": []}
+        content = {"lines": [], "offTopicPictures": []}
     elif body["response_format"]["json_schema"]["name"] == "TextReview":
         job = json.loads(body["messages"][1]["content"].rsplit("\n\n", 1)[1])
         ok = {"ok": True, "reason": ""}

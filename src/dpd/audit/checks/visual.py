@@ -9,10 +9,16 @@
 (`dpd.audit.visual`), ответы лежат в контексте аудита как `visual_review`.
 Без них проверки пропускаются, и это видно в отчёте.
 
-**Оформление шаблона не оценивается** (правило 12 CLAUDE.md): замечание о
-читаемости обязано указать элемент, который положила вёрстка, а картинки
-шаблона отмечаются, только если их сюжет не связан с темой слайда, — фон,
-логотипы и декор промпт исключает.
+**Читаемость сверяет код.** Модель переписывает текст, который видит на
+изображении, и помечает строки, разбираемые с трудом; проверка ищет в этой
+расшифровке каждую строку, которую положила вёрстка. Не нашлась — зритель её
+не увидит: это предупреждение, содержимое потеряно. Нашлась в строке с
+пометкой «с трудом» — рекомендация. Расшифровка неточна, поэтому строка
+считается увиденной, если прочитана доля её слов из `configs/audit.yaml`.
+
+**Оформление шаблона не оценивается** (правило 12 CLAUDE.md): сверяются
+только строки, положенные вёрсткой, — надписи шаблона в расшифровке не
+проверяются, а фон, логотипы и декор промпт исключает из вопроса о картинках.
 
 Каждая находка несёт `evidence.slideId`: по нему отчёт варианта находит
 слайд, даже когда номера сдвинулись.
@@ -20,9 +26,12 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from dpd.audit.registry import CheckSpec, check
+from dpd.audit.textual import plain
+from dpd.audit.visual import element_texts
 from dpd.models import Finding, RenderedPresentation
 
 if TYPE_CHECKING:
@@ -44,26 +53,56 @@ VISUAL_READABILITY = CheckSpec(
     severity="advice",
     fixability="lossy",
     sublayer="4c",
-    title="Слайд трудно прочитать: текст сливается с фоном или элементы выглядят случайными",
+    title="Текст на слайде не видно или он читается с трудом",
 )
+
+WORD = re.compile(r"\w+")
+MAX_QUOTED = 5
 
 
 @check(VISUAL_READABILITY)
-def check_visual_readability(deck: RenderedPresentation, visual_review: VisualReview) -> list[Finding]:
-    """Текст и данные, которые на изображении не прочитать, — на своём блоке."""
+def check_visual_readability(
+    deck: RenderedPresentation,
+    visual_review: VisualReview,
+    min_seen_share: float,
+) -> list[Finding]:
+    """Строки, которых на изображении нет или которые читаются с трудом, — на своём блоке."""
     findings: list[Finding] = []
     for number, (slide, look) in enumerate(zip(deck.slides, visual_review.slides, strict=True), start=1):
-        for issue in look.readability:
-            problem, text = issue.problem.strip(), issue.text.strip()
-            lead = f"Не читается «{text}»" if text else "Слайд трудно прочитать"
-            findings.append(
-                VISUAL_READABILITY.finding(
-                    f"{lead}: {problem}",
-                    slide_number=number,
-                    slot_id=slide.elements[issue.element - 1].slot_id,
-                    evidence={"slideId": slide.id, "element": issue.element, "text": text, "problem": problem},
+        seen = {word for line in look.lines for word in _words(line.text)}
+        faint = [_words(line.text) for line in look.lines if line.legibility == "faint"]
+        for position, element in enumerate(slide.elements, start=1):
+            missing: list[str] = []
+            strained: list[str] = []
+            for text in dict.fromkeys(element_texts(element)):
+                words = _words(text)
+                if not words:
+                    continue
+                if _share(words, seen) < min_seen_share:
+                    missing.append(text)
+                elif any(len(words & line) / max(len(words), len(line)) >= min_seen_share for line in faint):
+                    strained.append(text)
+            evidence = {"slideId": slide.id, "element": position}
+            if missing:
+                findings.append(
+                    VISUAL_READABILITY.finding(
+                        f"На изображении слайда не видно {_quoted(missing)}: текст сливается с фоном, "
+                        "закрыт другим или ушёл за край",
+                        severity="warning",
+                        slide_number=number,
+                        slot_id=element.slot_id,
+                        evidence={**evidence, "missing": missing},
+                    )
                 )
-            )
+            if strained:
+                findings.append(
+                    VISUAL_READABILITY.finding(
+                        f"Читается с трудом {_quoted(strained)}: буквы почти сливаются с фоном",
+                        slide_number=number,
+                        slot_id=element.slot_id,
+                        evidence={**evidence, "faint": strained},
+                    )
+                )
     return findings
 
 
@@ -82,6 +121,21 @@ def check_irrelevant_imagery(deck: RenderedPresentation, visual_review: VisualRe
                 )
             )
     return findings
+
+
+def _words(text: str) -> set[str]:
+    """Слова строки для сравнения: регистр, «ё», кавычки и знаки не важны."""
+    return set(WORD.findall(plain(text)))
+
+
+def _share(words: set[str], seen: set[str]) -> float:
+    return len(words & seen) / len(words)
+
+
+def _quoted(texts: list[str]) -> str:
+    shown = ", ".join(f"«{text}»" for text in texts[:MAX_QUOTED])
+    rest = len(texts) - MAX_QUOTED
+    return f"{shown} и ещё {rest}" if rest > 0 else shown
 
 
 __all__ = ["check_irrelevant_imagery", "check_visual_readability"]

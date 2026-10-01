@@ -512,7 +512,7 @@ def fake_render(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
 
 
 def vision(requests: list[dict]):
-    """VLM-подделка: на каждом слайде заголовок сливается с фоном."""
+    """VLM-подделка: на слайдах не видно ни строки."""
     import json
 
     import httpx
@@ -520,12 +520,8 @@ def vision(requests: list[dict]):
     from dpd.llm import ModelClient, ModelSettings, load_prompts
 
     def reply(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        requests.append(body)
-        [part] = [item for item in body["messages"][1]["content"] if item["type"] == "text"]
-        title = json.loads(part["text"])["elements"][0]["text"][0]
-        problem = "Заголовок сливается с фоном"
-        content = {"readability": [{"element": 1, "text": title, "problem": problem}], "offTopicPictures": []}
+        requests.append(json.loads(request.content))
+        content = {"lines": [], "offTopicPictures": []}
         message = {"role": "assistant", "content": json.dumps(content, ensure_ascii=False)}
         return httpx.Response(200, json={"choices": [{"message": message, "finish_reason": "stop"}]})
 
@@ -577,7 +573,7 @@ def test_look_audits_the_chosen_variant_only(
     assert len(converted) == launches
     report = looked.reports[variant]
     assert set(VISUAL) <= set(report.checks_run)
-    assert [f.slide_number for f in report.findings if f.check_id == "content.visual_readability"] == list(
+    assert sorted({f.slide_number for f in report.findings if f.check_id == "content.visual_readability"}) == list(
         range(1, len(deck.slides) + 1)
     )
     assert "visual" in report.timings
