@@ -58,6 +58,7 @@ AXIS_FREE_CHARTS = ("pie",)
 HEADING = re.compile(r"^#{1,6}[ \t]+(.+?)[ \t#]*$", re.MULTILINE)
 NUMBER = re.compile(r"\d{1,3}(?:[   ]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?")
 GROUP_SEPARATORS = re.compile(r"[   ]")
+LIST_NUMBER = re.compile(r"^[ \t]*\d+[.)][ \t]", re.MULTILINE)
 
 
 # --- Разделы и числа фактуры ------------------------------------------------------
@@ -100,6 +101,15 @@ def numbers_in(text: str) -> set[str]:
     return {canonical(raw) for raw in NUMBER.findall(text)}
 
 
+def fact_numbers(section: str) -> set[str]:
+    """Числа раздела фактуры, кроме номеров пунктов нумерованного списка.
+
+    Найдено живым прогоном: «4.» — номер этапа, а не факт, и проверка,
+    считавшая его числом, отправляла модель ссылаться не на тот раздел.
+    """
+    return numbers_in(LIST_NUMBER.sub("", section))
+
+
 def canonical(raw: str) -> str:
     return number_text(float(GROUP_SEPARATORS.sub("", raw).replace(",", ".")))
 
@@ -127,7 +137,7 @@ class SlideContent(Contract):
 
 def content_contract(role: str, sections: dict[str, str]) -> type[SlideContent]:
     """Контракт ответа для слайда с ролью `role`: якоря в схеме, числа в проверке."""
-    numbers = {anchor: numbers_in(text) for anchor, text in sections.items()}
+    numbers = {anchor: fact_numbers(text) for anchor, text in sections.items()}
 
     def check(content: SlideContent) -> SlideContent:
         # Правила вне схемы: их держит не провайдер, а повтор клиента.
@@ -210,7 +220,10 @@ def _untraced_numbers(content: SlideContent, numbers: dict[str, set[str]]) -> li
             if holders:
                 problems.append(f"{where}: число {raw} есть в разделах {', '.join(holders)}, а их нет в sourceRefs")
             else:
-                problems.append(f"{where}: числа {raw} нет в фактуре, а числа переносятся из неё как есть, без пересчёта")
+                problems.append(
+                    f"{where}: числа {raw} нет в фактуре — числа переносятся из неё как есть, "
+                    "без пересчёта, а записанное в фактуре словами остаётся словами"
+                )
     return problems
 
 

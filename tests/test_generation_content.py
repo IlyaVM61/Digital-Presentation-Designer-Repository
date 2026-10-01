@@ -29,6 +29,7 @@ from dpd.generation import (
     load_content_pack,
     numbers_in,
 )
+from dpd.generation.content import fact_numbers
 from dpd.layout.selector import requested_family
 from dpd.llm import ModelClient, ModelError, ModelSettings, load_prompts
 from dpd.models import PresentationStructure, StructureSlide
@@ -329,6 +330,33 @@ def test_title_slide_with_a_body_is_repaired() -> None:
 
     assert len(provider.for_slide(1)) == 2
     assert result.slides[0].body is None
+
+
+def test_list_numbering_of_the_facts_is_not_a_fact() -> None:
+    """Найдено живым прогоном: «4 часа» при «четырёх часах» в фактуре проверка
+    отправила к разделу, где «4.» — номер этапа, и модель трижды не смогла
+    это исправить."""
+    content = (
+        "## Этапы\n\n1. Заявка.\n2. Подбор пары — до 3 дней.\n3. Установочная встреча.\n"
+        "4. Работа в паре.\n   10) Шесть встреч.\n\n## Суть\n\nОколо четырёх часов в месяц."
+    )
+    wrong = answer(body=["Пара тратит 4 часа в месяц, 10 встреч"], refs=["content.md#суть"])
+    right = answer(body=["Пара тратит около четырёх часов в месяц"], refs=["content.md#суть"])
+    provider = Provider({1: [title_answer()], 2: [wrong, right], 3: [right]})
+    prompts = load_prompts()
+    client = ModelClient(
+        settings(),
+        repair_prompt=prompts.get("skills/response-repair").text,
+        transport=httpx.MockTransport(provider),
+    )
+
+    generate_content(structure(), ContentPack(brief=BRIEF, content=content), client, prompts)
+
+    repair = provider.for_slide(2)[1]["messages"][3]["content"]
+    assert "числа 4 нет в фактуре" in repair and "числа 10 нет в фактуре" in repair
+    assert "content.md#этапы" not in repair
+    # Число из самого пункта списка остаётся фактом, номер пункта — нет.
+    assert fact_numbers(fact_sections(content)["content.md#этапы"]) == {"3"}
 
 
 def test_number_found_in_a_cited_section_passes_whatever_its_spelling() -> None:
