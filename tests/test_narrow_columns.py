@@ -87,9 +87,10 @@ BULLETED = TextFrame(indent=0.05, line_spacing=1.15)
 # --- 1. Вместимость учитывает то, что отнимает место у текста ---------------
 
 
-def test_old_metric_saw_the_narrow_column_as_roomy_enough() -> None:
-    """Исходный случай: без учёта отступа и интервала список «помещался»."""
-    assert text_fits(WAVES, NARROW_COLUMN, NARROW_CANVAS, 14.0)
+def test_without_the_frame_the_column_looks_roomy_enough() -> None:
+    """Отступ и интервал решают: по всей рамке список помещается, за их вычетом — нет."""
+    assert text_fits(WAVES, NARROW_COLUMN, NARROW_CANVAS, 13.0)
+    assert not text_fits(WAVES, NARROW_COLUMN, NARROW_CANVAS, 13.0, BULLETED)
 
 
 def test_indent_and_line_spacing_reveal_the_overflow() -> None:
@@ -100,17 +101,37 @@ def test_indent_and_line_spacing_reveal_the_overflow() -> None:
 def test_words_are_not_split_between_lines() -> None:
     """Строка переносится по словам: остаток строки, куда слово не влезло, пуст.
 
-    Ширина — ровно десять знаков, слова по шесть: по числу знаков 27 знаков
-    дают три строки, по словам — четыре, по слову на строку.
+    В строку входит одно слово из шести букв, двух уже нет: четыре слова —
+    четыре строки, хотя по числу знаков (27 при десяти на строку) их три.
     """
     canvas = NARROW_CANVAS
     size = 10.0
-    width = 51 / 720  # 51 pt при ширине холста 720 pt: 10 знаков по 5 pt
+    width = 51 / 720  # 51 pt при ширине холста 720 pt: 5,1 кегля, слово из шести букв — 3,3
     three_lines = 40 / 405  # 40 pt высоты при высоте холста 405 pt: 3 строки по 12,5 pt
     bounds = Bounds(x=0.1, y=0.1, w=width, h=three_lines)
 
     assert not text_fits(["абвгде абвгде абвгде абвгде"], bounds, canvas, size)
     assert text_fits(["абвгде абвгде абвгде"], bounds, canvas, size)
+
+
+def test_long_word_is_not_broken_by_the_chosen_size() -> None:
+    """Кегль, при котором самое длинное слово не помещается в строку, не годится.
+
+    Сборка T-60 на Jessica: в колонке шириной 0,21 холста «масштабирование»
+    разорвалось на «масштабировани» и «е» — по высоте текст помещался.
+    Буква кириллицы в ходовых гарнитурах — 0,53–0,54 кегля (замер на
+    контент-пакете: Arial, Segoe UI, Tahoma), а не 0,5.
+    """
+    text = ["Поволновый запуск позволяет остановить масштабирование"]
+    width = 98 / 720  # 98 pt: при 14 pt — 7 кеглей ширины, слово из 15 букв шире
+    slot = Slot(
+        id="body-1", kind="body", origin="placeholder", bounds=Bounds(x=0.06, y=0.2, w=width, h=0.7),
+        text_style=TextStyle(font="Arial", size_pt=14.0, resolved_from="layout.lstStyle"),
+    )
+    compensations, runs = plan_compensations(text, slot, NARROW_CANVAS, [10.0, 12.0, 14.0])
+    assert runs[0].size_pt == 10.0
+    assert [item.kind for item in compensations] == ["fontScale"]
+    assert "слово" in compensations[0].reason
 
 
 def test_insets_take_room_from_the_text() -> None:
