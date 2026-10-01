@@ -13,9 +13,15 @@ Streamlit выбран решением D6 (ADR-0005): сценарий мног
 один макет, размеченный одним заголовком, или тема, врущая про гарнитуру.
 Узнать это до того, как ждать полминуты, честнее, чем после.
 
-**План колоды пока вводится руками.** Слой генерации по брифу — задача T-49;
-до неё структуру приносит пользователь, и подменять это правдоподобной
-заглушкой нельзя: пользователь решил бы, что модель уже работает.
+**Текст слайдов пишет модель по контент-пакету** (T-58): бриф и материалы
+загружаются файлами, `draft` оркестратора пишет колоду и проверяет её текст
+до вёрстки — тем же путём, что батч сдачи. План, написанный руками, остался
+вторым путём: он собирается без модели и без сети (NFR-7).
+
+**Модель смотрит на слайды выбранного варианта по кнопке** (T-52, ADR-0002,
+п. 4): это полминуты и запрос на слайд, а варианты переключают, чтобы
+сравнить, — смотреть каждый при переключении значило бы втрое больше
+ожидания и запросов.
 
 **Варианты выбираются после того, как их увидели** (T-39). Три варианта
 стоят рядом, строка на слайд, а файлы всех трёх готовы с прогона: выбор
@@ -47,10 +53,11 @@ from pathlib import Path
 import streamlit as st
 
 from dpd.audit.remedies import plain_title
-from dpd.generation import structure_from_outline
+from dpd.generation import ContentPack, structure_from_outline
+from dpd.llm import build_client, load_prompts, load_settings
 from dpd.models import AuditReport, Finding
 from dpd.models.audit import SEVERITY_ORDER
-from dpd.orchestrator import STAGE_TITLES, Revision, RunResult, revise, run_pipeline
+from dpd.orchestrator import DRAFT_TITLES, STAGE_TITLES, Revision, RunResult, draft, look, revise, run_pipeline
 from dpd.render import soffice_path
 
 FORMATS = [("pptx", "PowerPoint (.pptx)"), ("pdf", "PDF (.pdf)"), ("html", "HTML (.html)")]
@@ -59,6 +66,13 @@ MIME = {
     "pdf": "application/pdf",
     "html": "text/html",
 }
+
+FROM_PACK = "Написать по брифу и материалам"
+FROM_PLAN = "Взять мой план"
+
+# Проверки, для которых модель смотрит на изображения слайдов (T-52). Пока
+# они названы в отчёте пропущенными, на этот вариант модель не смотрела.
+VISUAL_CHECKS = ("content.irrelevant_imagery", "content.visual_readability")
 
 PLACEHOLDER_OUTLINE = """Итоги пилота
 Что изменилось за квартал
@@ -189,7 +203,7 @@ SEVERITY_WORDS = {"critical": "Важно", "warning": "Стоит поправ�
 # Что сказать о замечании, для которого готового способа нет.
 NO_REMEDY = {
     "lossy": "Готового способа нет — поправьте в PowerPoint или оставьте как есть.",
-    "semantic": "Здесь нужен другой текст — поправьте план и соберите заново.",
+    "semantic": "Здесь нужен другой текст — поправьте материалы или план и соберите заново.",
     "none": "Решение за вами: система только сообщает.",
     "mechanical": "Исправить автоматически не получилось — поправьте в PowerPoint.",
 }
@@ -292,6 +306,41 @@ def choose_fixes(result: RunResult, variant: str) -> None:
         st.rerun()
 
 
+def offer_look(result: RunResult, variant: str) -> None:
+    """Модель смотрит на слайды выбранного варианта (T-52) — по кнопке.
+
+    Её замечания дописываются в список «Что стоит поправить». После
+    исправления слайды другие, и кнопка появляется снова: прежний взгляд
+    модели к ним уже не относится.
+    """
+    report = result.reports[variant]
+    if not set(VISUAL_CHECKS) & set(report.checks_skipped):
+        секунд = report.timings.get("visual")
+        st.caption(
+            "Модель посмотрела на слайды этого варианта"
+            + (f" за {секунд:.0f} с" if секунд else "")
+            + ": что она заметила, — в списке ниже."
+        )
+        return
+    if not st.button(
+        "Проверить, как выглядят слайды",
+        key="look",
+        help="Модель смотрит на каждый слайд выбранного варианта: виден ли текст и к месту ли картинки. "
+        "Около полуминуты, нужен интернет.",
+    ):
+        return
+    with st.spinner("Модель смотрит на слайды"):
+        try:
+            prompts = load_prompts()
+            looked = look(result, variant, build_client(load_settings("vlm"), prompts), prompts)
+        except Exception as error:  # noqa: BLE001 — пользователю нужна причина, а не трассировка
+            st.error("Посмотреть на слайды не получилось. Остальные проверки выполнены, файлы готовы к скачиванию.")
+            show_details("Подробности сбоя", error)
+            return
+    st.session_state["result"] = looked
+    st.rerun()
+
+
 def show_side_by_side(result: RunResult) -> None:
     """Показать варианты рядом: строка на слайд, колонка на вариант (T-39).
 
@@ -299,7 +348,9 @@ def show_side_by_side(result: RunResult) -> None:
     слайд трёх вариантов стоит в одной строке, а не за переключателем:
     сравнение по памяти различия не показывает, а только утверждает.
     """
-    if not result.variant_previews:
+    # Изображения бывают не у всех: модель, посмотрев на выбранный вариант,
+    # рисует только его, — а одна колонка из трёх сравнения не даёт.
+    if len(result.variant_previews) < len(result.variants):
         st.info(
             "Превью выключено: сравнить варианты можно по скачанным файлам. "
             "Включите «Превью слайдов», чтобы увидеть их рядом."
@@ -374,12 +425,31 @@ if report is not None:
             f"**Палитра:** {палитра}  \n**Шкала кеглей:** {шкала} pt"
         )
 
-st.subheader("План презентации")
-st.caption(
-    "Строка без знака — заголовок слайда, строка со знаком «-» — его пункт. "
-    "Пока содержание пишете вы: генерация плана по свободному брифу появится позже."
+st.subheader("Содержание")
+источник = st.radio(
+    "Откуда взять текст слайдов",
+    [FROM_PACK, FROM_PLAN],
+    captions=[
+        "Модель напишет текст по вашим файлам — это несколько минут",
+        "Заголовки и пункты пишете вы, модель не нужна",
+    ],
+    horizontal=True,
+    key="source",
 )
-outline = st.text_area("План", value=PLACEHOLDER_OUTLINE, height=200, label_visibility="collapsed")
+по_материалам = источник == FROM_PACK
+brief = content = None
+outline = ""
+if по_материалам:
+    st.caption(
+        "Бриф — для кого и зачем презентация, сколько в ней слайдов. Материалы — тезисы, "
+        "цифры, таблицы: каждое число на слайдах модель берёт из них."
+    )
+    левая, правая = st.columns(2)
+    brief = левая.file_uploader("Бриф", type=["md", "txt"], key="brief")
+    content = правая.file_uploader("Материалы", type=["md", "txt"], key="content")
+else:
+    st.caption("Строка без знака — заголовок слайда, строка со знаком «-» — его пункт.")
+    outline = st.text_area("План", value=PLACEHOLDER_OUTLINE, height=200, label_visibility="collapsed")
 
 st.subheader("В каких форматах скачать", help=f"Копии файлов сохраняются в {output_dir()}")
 st.caption("Файлы готовятся для всех трёх вариантов сразу — выбрать можно после сборки.")
@@ -402,37 +472,60 @@ with columns[-1]:
 if st.button("Собрать презентацию", type="primary"):
     if uploaded is None or report is None:
         st.warning("Сначала загрузите шаблон `.pptx` — без него собирать не по чему.")
-    elif not outline.strip():
+    elif по_материалам and (brief is None or content is None):
+        st.warning("Загрузите бриф и материалы — без них модели не из чего писать текст.")
+    elif not по_материалам and not outline.strip():
         st.warning("План презентации пуст. Напишите хотя бы один заголовок.")
     elif not chosen_formats:
         st.warning("Выберите хотя бы один формат выгрузки.")
     else:
         bar = st.progress(0.0, text="Начинаем")
-        стадии = {name: 0.0 for name in STAGE_TITLES}
+        названия = {**DRAFT_TITLES, **STAGE_TITLES} if по_материалам else STAGE_TITLES
+        стадии = {name: 0.0 for name in названия}
 
         def show(stage: str, done: int, total: int) -> None:
             """Прогресс считается по этапам: пользователь ждёт десятки секунд."""
             стадии[stage] = done / total if total else 1.0
             доля = sum(стадии.values()) / len(стадии)
-            bar.progress(min(доля, 1.0), text=STAGE_TITLES.get(stage, stage))
+            bar.progress(min(доля, 1.0), text=названия.get(stage, stage))
 
         started = time.perf_counter()
+        пишем = по_материалам
         try:
+            if по_материалам:
+                pack = ContentPack(
+                    brief=brief.getvalue().decode("utf-8-sig").strip(),
+                    content=content.getvalue().decode("utf-8-sig").strip(),
+                )
+                prompts = load_prompts()
+                drafted = draft(pack, build_client(load_settings("llm"), prompts), prompts, progress=show)
+                structure, text_audit, review_error = drafted.structure, drafted.text_audit, drafted.review_error
+            else:
+                structure, text_audit, review_error = structure_from_outline(outline), None, None
+            пишем = False
             result = run_pipeline(
                 report["path"],
-                structure_from_outline(outline),
+                structure,
                 output_dir() / time.strftime("%Y%m%d-%H%M%S"),
                 formats=tuple(chosen_formats),
                 previews=previews,
                 progress=show,
+                text_audit=text_audit,
             )
         except Exception as error:  # noqa: BLE001 — пользователю нужна причина, а не трассировка
             bar.empty()
             st.session_state.pop("result", None)
-            st.error(
-                "Собрать презентацию не получилось. Попробуйте ещё раз; если сбой "
-                "повторится, передайте разработчикам подробности ниже."
-            )
+            if пишем:
+                st.error(
+                    "Написать текст презентации не получилось. Проверьте "
+                    "интернет и попробуйте ещё раз — или соберите по своему плану. Если сбой "
+                    "повторится, передайте разработчикам подробности ниже."
+                )
+            else:
+                st.error(
+                    "Собрать презентацию не получилось. Попробуйте ещё раз; если сбой "
+                    "повторится, передайте разработчикам подробности ниже."
+                )
             show_details("Подробности сбоя", error)
         else:
             bar.progress(1.0, text="Готово")
@@ -441,6 +534,7 @@ if st.button("Собрать презентацию", type="primary"):
             # вместе с ней исчезли бы и остальные кнопки, и отчёт аудита.
             st.session_state["result"] = result
             st.session_state["seconds"] = time.perf_counter() - started
+            st.session_state["review_error"] = review_error
 
 result = st.session_state.get("result")
 if result is not None:
@@ -450,10 +544,20 @@ if result is not None:
     with st.expander("Из чего сложилось время"):
         st.markdown(
             ", ".join(
-                f"{STAGE_TITLES.get(stage, stage)} — {seconds:.1f} с"
+                f"{({**DRAFT_TITLES, **STAGE_TITLES}).get(stage, stage)} — {seconds:.1f} с"
                 for stage, seconds in result.timings.items()
             )
         )
+
+    if st.session_state.get("review_error"):
+        # Пропуск называется на виду: без него «замечаний к тексту нет»
+        # читалось бы как проверенный текст.
+        st.warning(
+            "Смысл текста проверить не удалось — модель не ответила. Оформление проверено, "
+            "файлы готовы; текст стоит перечитать самим."
+        )
+        with st.expander("Подробности сбоя проверки текста"):
+            st.code(st.session_state["review_error"], language=None)
 
     находки = sum(len(report_.findings) for report_ in result.reports.values())
     исправлено = sum(fixed(report_) for report_ in result.reports.values())
@@ -511,6 +615,7 @@ if result is not None:
                 "`conflict_rule: template` заставит следовать объявлению шаблона."
             )
 
+    offer_look(result, выбран)
     choose_fixes(result, выбран)
 
     # Файлы всех трёх вариантов готовы с прогона: выбор переключает кнопки,

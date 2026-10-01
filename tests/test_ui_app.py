@@ -64,16 +64,33 @@ def upload(app: AppTest, path: Path) -> AppTest:
     return app.run()
 
 
+def write_plan(app: AppTest, text: str) -> None:
+    """Текст слайдов — своим планом, без модели: путь детерминированного контура.
+
+    По умолчанию текст пишет модель (T-58), и поле плана появляется только
+    после выбора этого пути.
+    """
+    source = app.radio(key="source")
+    source.set_value(source.options[1]).run()
+    app.text_area[0].set_value(text)
+
+
 # --- Страница открывается --------------------------------------------------
 
 
 def test_page_offers_upload_and_plan(app: AppTest) -> None:
-    """До загрузки шаблона страница объясняет, чего ждёт."""
+    """До загрузки шаблона страница объясняет, чего ждёт: шаблон и откуда
+    взять текст — материалы для модели или свой план."""
     app.run()
 
     assert not app.exception
     assert app.title[0].value.startswith("Цифровой дизайнер")
-    assert app.file_uploader, "нет поля загрузки шаблона"
+    assert len(app.file_uploader) == 3, "нет полей шаблона, брифа и материалов"
+    assert len(app.radio(key="source").options) == 2
+
+    write_plan(app, OUTLINE)
+
+    assert not app.exception
     assert app.text_area, "нет поля плана колоды"
 
 
@@ -113,7 +130,7 @@ def test_scenario_runs_from_file_to_exported_files(app: AppTest) -> None:
     десятков секунд — он проверен в тестах оркестратора и экспорта.
     """
     upload(app, template_file())
-    app.text_area[0].set_value(OUTLINE)
+    write_plan(app, OUTLINE)
     for checkbox in app.checkbox:
         нужен = any(fmt in checkbox.label.lower() for fmt in ("pptx", "html"))
         checkbox.set_value(нужен)
@@ -139,7 +156,7 @@ def test_results_survive_a_download_click(app: AppTest) -> None:
     отчёт аудита: пользователь получал один файл из трёх и пустую страницу.
     """
     upload(app, template_file())
-    app.text_area[0].set_value(OUTLINE)
+    write_plan(app, OUTLINE)
     for checkbox in app.checkbox:
         checkbox.set_value(any(fmt in checkbox.label.lower() for fmt in ("pptx", "html")))
     app.button[0].click().run()
@@ -180,7 +197,7 @@ def test_timings_are_shown_after_the_run(app: AppTest) -> None:
     from dpd.orchestrator import STAGE_TITLES, STAGES
 
     upload(app, template_file())
-    app.text_area[0].set_value(OUTLINE)
+    write_plan(app, OUTLINE)
     app.button[0].click().run()
 
     assert re.search(r"готова за \d+[.,]\d с", page_text(app, folded=False)), "общего времени не видно"
@@ -195,7 +212,7 @@ def test_timings_are_shown_after_the_run(app: AppTest) -> None:
 def test_empty_plan_is_refused_with_an_explanation(app: AppTest) -> None:
     """Пустой план — не колода из нуля слайдов, а несделанная работа."""
     upload(app, template_file())
-    app.text_area[0].set_value("   ")
+    write_plan(app, "   ")
     app.button[0].click().run()
 
     assert not app.exception
@@ -212,7 +229,7 @@ def test_empty_plan_is_refused_with_an_explanation(app: AppTest) -> None:
 def build(app: AppTest, *, formats: tuple[str, ...], previews: bool) -> AppTest:
     """Собрать колоду с нужными галочками."""
     upload(app, template_file())
-    app.text_area[0].set_value(OUTLINE)
+    write_plan(app, OUTLINE)
     for checkbox in app.checkbox:
         if checkbox.label.startswith("Превью"):
             checkbox.set_value(previews)
@@ -256,7 +273,7 @@ def test_choosing_a_variant_switches_the_files(app: AppTest) -> None:
 
     assert not app.exception, app.exception
     assert app.radio, "выбрать вариант нечем"
-    выбор = app.radio[0]
+    выбор = app.radio(key="variant")
     assert len(выбор.options) == 3
 
     выбор.set_value("C").run()
@@ -388,7 +405,7 @@ def test_plain_view_has_no_layout_jargon(app: AppTest) -> None:
     файлы. Всё это должно читаться без знания вёрстки.
     """
     build(app, formats=("pptx", "html"), previews=False)
-    app.radio[0].set_value("C").run()
+    app.radio(key="variant").set_value("C").run()
 
     assert not app.exception, app.exception
     assert not jargon_in(page_text(app, folded=False))
@@ -463,7 +480,7 @@ def test_failed_run_is_explained_plainly(app: AppTest, monkeypatch: pytest.Monke
 
     monkeypatch.setattr("dpd.orchestrator.run_pipeline", сбой)
     upload(app, template_file())
-    app.text_area[0].set_value(OUTLINE)
+    write_plan(app, OUTLINE)
     app.button[0].click().run()
 
     assert not app.exception, app.exception
@@ -494,7 +511,7 @@ CROWDED = OUTLINE + """Что умеет система
 
 def crowded(app: AppTest) -> AppTest:
     upload(app, template_file())
-    app.text_area[0].set_value(CROWDED)
+    write_plan(app, CROWDED)
     for checkbox in app.checkbox:
         checkbox.set_value("pptx" in checkbox.label.lower())
     return app.button[0].click().run()
@@ -553,3 +570,155 @@ def test_leaving_everything_as_is_is_a_valid_choice(app: AppTest) -> None:
 
     assert not app.exception, app.exception
     assert fix_choice(app) is not None, "находка пропала, хотя ничего не выбрано"
+
+
+# --- T-58: колода по контент-пакету из интерфейса ----------------------------
+#
+# Критерий приёмки: со страницы загружаются шаблон и контент-пакет, колоду
+# пишет модель, аудит текста и аудит визуала выбранного варианта
+# выполняются, файлы скачиваются. Модели подменены подделкой батча: тест
+# проверяет страницу, а не модель, — модель проверяется живым прогоном.
+
+PACK = Path(__file__).resolve().parents[1] / "assets" / "content-pack"
+VISUAL = ("content.irrelevant_imagery", "content.visual_readability")
+
+
+def offline_models(monkeypatch: pytest.MonkeyPatch, *, refuse: str | None = None) -> list[str]:
+    """Обе роли отвечают подделкой; `refuse` — схема ответа, на которой провайдер
+    отказывает (`"*"` — на любой). Возвращает схемы запрошенных ответов."""
+    import json
+
+    import httpx
+    from test_batch import SETTINGS, fake_model
+
+    from dpd import llm
+
+    real = llm.build_client
+    asked: list[str] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        name = json.loads(request.content)["response_format"]["json_schema"]["name"]
+        asked.append(name)
+        if refuse in (name, "*"):
+            return httpx.Response(401, json={"error": {"message": "No auth credentials found"}})
+        return fake_model(request)
+
+    monkeypatch.setattr(llm, "build_client", lambda settings, prompts, **_: real(SETTINGS, prompts, transport=httpx.MockTransport(reply)))
+    return asked
+
+
+def from_pack(app: AppTest, *, pack: bool = True) -> AppTest:
+    """Шаблон и контент-пакет — так же, как их выберет пользователь, — и сборка."""
+    upload(app, template_file())
+    if pack:
+        for key in ("brief", "content"):
+            app.file_uploader(key=key).upload(f"{key}.md", (PACK / f"{key}.md").read_bytes(), "text/markdown")
+        app.run()
+    for checkbox in app.checkbox:
+        if checkbox.label.startswith("Превью"):
+            checkbox.set_value(False)
+        else:
+            checkbox.set_value(any(fmt in checkbox.label.lower() for fmt in ("pptx", "html")))
+    return app.button[0].click().run()
+
+
+def test_deck_is_written_from_the_content_pack_and_downloaded(app: AppTest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Критерий T-58 целиком, глазами пользователя."""
+    from test_batch import GENERATED_BODY, fake_render
+
+    asked = offline_models(monkeypatch)
+    fake_render(monkeypatch)
+    from_pack(app)
+
+    assert not app.exception, app.exception
+    result = app.session_state["result"]
+    assert any(slide.body and GENERATED_BODY in slide.body.items for slide in result.structure.slides)
+    # Аудит текста — до вёрстки, в отчёте каждого варианта; модель смотрит
+    # на слайды только после выбора (ADR-0002, п. 4).
+    assert {"DeckOutline", "TextReview"} <= set(asked)
+    assert "SlideLook" not in asked
+    for report in result.reports.values():
+        assert "content.headline_no_conclusion" in report.checks_run
+        assert set(VISUAL) <= set(report.checks_skipped)
+
+    app.radio(key="variant").set_value("B").run()
+    app.button(key="look").click().run()
+
+    assert not app.exception, app.exception
+    assert "SlideLook" in asked
+    looked = app.session_state["result"].reports
+    assert set(VISUAL) <= set(looked["B"].checks_run)
+    assert set(VISUAL) <= set(looked["A"].checks_skipped), "смотрели не только выбранный вариант"
+    assert "look" not in [button.key for button in app.button], "просмотренный вариант предлагают смотреть снова"
+    имена = [button.label for button in app.download_button]
+    assert len(имена) == 2 and all("-B." in name for name in имена), имена
+    assert not jargon_in(page_text(app, folded=False))
+
+
+def test_writing_time_is_in_the_breakdown(app: AppTest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Генерация — самая долгая часть цикла (536 с в T-43, из них 260 —
+    текст), и в разбивке времени она стоит первой, как шла."""
+    from dpd.orchestrator import DRAFT_TITLES, STAGE_TITLES
+
+    offline_models(monkeypatch)
+    from_pack(app)
+
+    assert not app.exception, app.exception
+    блок = next(item for item in app.expander if item.label == "Из чего сложилось время")
+    разбивка = " ".join(item.value for item in блок.markdown)
+    позиции = [разбивка.find(title) for title in (*DRAFT_TITLES.values(), STAGE_TITLES["parse"])]
+    assert -1 not in позиции and позиции == sorted(позиции), разбивка
+
+
+def test_content_pack_is_required_before_any_request(app: AppTest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Без брифа и материалов модели не из чего писать — запрос не уходит."""
+    asked = offline_models(monkeypatch)
+    from_pack(app, pack=False)
+
+    assert not app.exception, app.exception
+    assert app.warning, "интерфейс не объяснил, чего не хватает"
+    assert asked == []
+    assert "result" not in app.session_state
+
+
+def test_failed_writing_is_explained_plainly(app: AppTest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Модель недоступна: на виду — что делать, причина — в подробностях."""
+    offline_models(monkeypatch, refuse="*")
+    from_pack(app)
+
+    assert not app.exception, app.exception
+    assert app.error, "сбой не показан"
+    assert "result" not in app.session_state
+    на_виду = page_text(app, folded=False)
+    assert "HTTP 401" not in на_виду
+    assert not jargon_in(на_виду)
+    assert "HTTP 401" in page_text(app, folded=True), "причину сбоя не найти"
+
+
+def test_failed_text_check_is_reported_not_hidden(app: AppTest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Проверка текста не удалась — колода собирается, но пользователь
+    узнаёт, что смысл текста не проверен, а не думает, что замечаний нет."""
+    offline_models(monkeypatch, refuse="TextReview")
+    from_pack(app)
+
+    assert not app.exception, app.exception
+    assert app.download_button, "колода не собрана"
+    assert app.warning, "пропуск проверки текста не показан"
+    assert not jargon_in(page_text(app, folded=False))
+    assert "HTTP 401" in page_text(app, folded=True)
+
+
+def test_failed_look_keeps_the_files(app: AppTest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Модель не посмотрела на слайды — файлы остаются, сбой объяснён."""
+    from test_batch import fake_render
+
+    offline_models(monkeypatch, refuse="SlideLook")
+    fake_render(monkeypatch)
+    from_pack(app)
+    app.button(key="look").click().run()
+
+    assert not app.exception, app.exception
+    assert app.error, "сбой не показан"
+    assert app.download_button, "файлы пропали"
+    assert set(VISUAL) <= set(app.session_state["result"].reports["A"].checks_skipped)
+    assert not jargon_in(page_text(app, folded=False))
