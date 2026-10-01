@@ -74,7 +74,7 @@ D:\venvs\dpd\Scripts\streamlit run ui/app.py
 D:\venvs\dpd\Scripts\python -m dpd.batch
 
 # End-to-end на неизвестном шаблоне идёт через страницу, как в видео. Запасной путь — тот же батч
-# с перечнем из одного приёмочного шаблона (до T-59 там Jessica — с 2026-10-01 она не приёмочная)
+# с перечнем из одного приёмочного шаблона — BRISA Master Presentation Template (T-59)
 D:\venvs\dpd\Scripts\python -m dpd.batch --matrix configs/acceptance.yaml --out $DPD_OUTPUT_DIR/out/acceptance
 
 # Тесты
@@ -157,7 +157,7 @@ scripts/                       служебные скрипты и requirements
 
 Опубликованы только производные выводы: результаты инструментального разбора OOXML — распределения кеглей, доли наследуемых свойств, число макетов и слотов, метрики качества разметки. Они собраны в `docs/01-research/` и нужны потому, что на них опираются все архитектурные решения проекта: без оснований эти решения выглядели бы произвольными. Чтобы воспроизвести разбор, положите свои файлы в `assets/templates/calibration/` — инструкция в README этого каталога.
 
-Приёмочный шаблон `Jessica · SlidesCarnival.pptx` в репозитории **присутствует**: он распространяется под Creative Commons Attribution 4.0 International, что публикацию разрешает. Атрибуция — в `assets/templates/acceptance/README.md`, как того требует лицензия. С 2026-10-01 Jessica использована для отладки (T-57) и приёмочным шаблоном не считается; новый выбирается до видео (T-59).
+Приёмочный шаблон `BRISA Master Presentation Template.pptx` (T-59) и отладочный `Jessica · SlidesCarnival.pptx` в репозитории **присутствуют**: оба распространяются под Creative Commons Attribution 4.0 International, что публикацию разрешает. Атрибуция — в `README.md` каталогов `assets/templates/acceptance/` и `assets/templates/debug/`, как того требует лицензия. Jessica была приёмочной до 2026-10-01: на ней отлаживали T-57, и её сменила BRISA.
 
 ## Документация
 
