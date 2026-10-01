@@ -42,6 +42,10 @@ def build(spec: ChartSpec, slot: Slot, tokens: DesignTokens | None) -> RenderedC
         has_legend=len(spec.series) > 1,
         font=_font(tokens, slot),
         size_pt=_size(tokens, slot),
+        # Фона у диаграммы нет: подписи лежат на фоне слайда и набираются,
+        # как основной текст. Без цвета их красила программа просмотра —
+        # чёрным, в том числе по чёрному фону (T-56).
+        text_color=slot.text_style.color if slot.text_style else None,
     )
 
 

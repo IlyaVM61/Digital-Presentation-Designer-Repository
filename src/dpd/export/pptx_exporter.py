@@ -173,12 +173,37 @@ def _write_chart(pptx_slide, element, canvas: Canvas) -> None:
     _colour_series(chart, spec)
     _title_axes(chart, spec)
 
-    if spec.font or spec.size_pt:
+    if spec.font or spec.size_pt or spec.text_color:
         text = chart.font
         if spec.font:
             text.name = spec.font
         if spec.size_pt:
             text.size = Pt(spec.size_pt)
+        if spec.text_color:
+            text.color.rgb = RGBColor.from_string(spec.text_color.lstrip("#"))
+    _colour_labels(chart, spec)
+
+
+def _colour_labels(chart, spec) -> None:
+    """Окрасить подписи осей и легенду явно, а не только по умолчанию диаграммы.
+
+    Цвет текста всей диаграммы — лишь умолчание, и программы просмотра читают
+    его по-разному; подпись без собственного цвета рисуется чёрной и на
+    чёрном фоне пропадает (T-56).
+    """
+    if not spec.text_color:
+        return
+    colour = RGBColor.from_string(spec.text_color.lstrip("#"))
+    if spec.has_legend:
+        chart.legend.font.color.rgb = colour
+    if spec.chart_type == "pie":
+        return
+    for axis in (chart.category_axis, chart.value_axis):
+        axis.tick_labels.font.color.rgb = colour
+        if axis.has_title:
+            for paragraph in axis.axis_title.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    run.font.color.rgb = colour
 
 
 def _colour_series(chart, spec) -> None:
@@ -236,19 +261,30 @@ def _write_table(pptx_slide, element, canvas: Canvas) -> None:
     )
     grid = shape.table
 
+    # Заливку каждой ячейки задаёт вёрстка. Без явной заливки ячейку красит
+    # стиль таблицы по умолчанию — цветом акцента темы и его светлыми
+    # оттенками, которых вёрстка не видит: так шапка сливалась с текстом,
+    # а белые строки — со светлой полосой (T-56).
     for column, title in enumerate(table.headers):
-        _fill_cell(grid.cell(0, column), title, table, table.header_color)
+        _fill_cell(grid.cell(0, column), title, table, table.header_color, table.header_fill, bold=True)
 
     for row_index, row in enumerate(table.rows, start=1):
         for column, value in enumerate(row):
-            _fill_cell(grid.cell(row_index, column), value, table, table.body_color)
+            _fill_cell(grid.cell(row_index, column), value, table, table.body_color, None)
 
 
-def _fill_cell(cell, text: str, table, colour: str | None) -> None:
+def _fill_cell(cell, text: str, table, colour: str | None, fill: str | None, bold: bool = False) -> None:
+    if fill:
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = RGBColor.from_string(fill.lstrip("#"))
+    else:
+        cell.fill.background()
     cell.text = ""
     paragraph = cell.text_frame.paragraphs[0]
     run = paragraph.add_run()
     run.text = text
+    if bold:
+        run.font.bold = True
     if table.font:
         run.font.name = table.font
     if table.size_pt:

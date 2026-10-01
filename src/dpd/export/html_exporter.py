@@ -150,8 +150,9 @@ def _paragraphs(element: RenderedElement, scheme: str) -> str:
 def _table(table: RenderedTable) -> str:
     font = f"font-family: '{table.font}', sans-serif; " if table.font else ""
     size = f"font-size: {table.size_pt:g}pt; " if table.size_pt else ""
+    fill = f"background: {table.header_fill}; " if table.header_fill else ""
     head = "".join(
-        f'<th style="color: {table.header_color or "inherit"}">{html.escape(cell)}</th>'
+        f'<th style="{fill}color: {table.header_color or "inherit"}">{html.escape(cell)}</th>'
         for cell in table.headers
     )
     body = "".join(
@@ -170,7 +171,7 @@ def _chart(chart: RenderedChart, scheme: str) -> str:
     Картинкой диаграмма стала бы нечитаемой для поиска, а таблицей потеряла
     бы смысл визуализации, ради которого её и выбрали.
     """
-    colour = SCHEME_TEXT.get(scheme, "#111418")
+    colour = chart.text_color or SCHEME_TEXT.get(scheme, "#111418")
     font = f"font-family: '{chart.font}', sans-serif;" if chart.font else ""
     width, height = 100.0, 100.0
     pad = CHART_PADDING * 100

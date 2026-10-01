@@ -21,6 +21,11 @@ MAX_ROWS = 7
 
 MAX_COLUMNS = 5
 
+HEADER_MIN_CONTRAST = 4.5
+"""Контраст текста шапки к её заливке — порог WCAG AA для обычного текста,
+тот же, что у проверки `template.contrast_low`. Кегль таблицы мельче
+основного текста, и сниженный порог крупного текста к ней не относится."""
+
 TABLE_SIZE_STEPS_DOWN = 2
 """На сколько ступеней шкалы кегль таблицы мельче основного текста.
 
@@ -57,6 +62,7 @@ def build(
 
     # Строки выравниваются по ширине шапки: неровная сетка ломает экспорт.
     normalised = [row + [""] * (len(headers) - len(row)) for row in rows]
+    header_fill, header_colour = _header(tokens, slot)
 
     return (
         RenderedTable(
@@ -64,7 +70,8 @@ def build(
             rows=normalised,
             font=_font(tokens, slot),
             size_pt=_size(tokens, slot),
-            header_color=_header_colour(tokens, slot),
+            header_color=header_colour,
+            header_fill=header_fill,
             body_color=_body_colour(slot),
         ),
         compensations,
@@ -86,21 +93,54 @@ def _size(tokens: DesignTokens | None, slot: Slot) -> float | None:
     return scale[index]
 
 
-def _header_colour(tokens: DesignTokens | None, slot: Slot) -> str | None:
-    """Шапка выделяется брендовым цветом, если он в шаблоне есть.
+def _header(tokens: DesignTokens | None, slot: Slot) -> tuple[str | None, str | None]:
+    """Заливка шапки и цвет её текста — одной парой (T-56).
 
-    Это единственная вольность, которую вёрстка себе позволяет, и она
-    остаётся внутри палитры шаблона: цвет берётся из токенов, а не
-    придумывается.
+    Шапка заливается брендовым цветом, если он в шаблоне есть: это
+    единственная вольность, которую вёрстка себе позволяет, и она остаётся
+    внутри палитры. Текст на заливке — первый читаемый на ней цвет: сначала
+    цвет строк, чтобы таблица была набрана одним цветом, потом цвета палитры
+    по частоте. Цвет не из палитры не берётся — он выдал бы, что слайд собран
+    мимо шаблона, а аудит заменил бы его ближайшим из палитры, не глядя на
+    заливку.
+
+    Раньше заливку давал стиль таблицы по умолчанию — цвет акцента темы, а
+    текст красился брендовым: где они совпадали, шапка исчезала. Если ни один
+    цвет палитры на брендовом не читается, шапка остаётся без заливки и
+    набирается, как строки.
     """
-    if tokens:
-        brand = next(
-            (token for token in tokens.colors if token.role == "brand.primary"), None
-        )
-        if brand:
-            return brand.value
-    return slot.text_style.color if slot.text_style else None
+    body = _body_colour(slot)
+    brand = next(
+        (token.value for token in tokens.colors if token.role == "brand.primary"), None
+    ) if tokens else None
+    if brand is None:
+        return None, body
+
+    palette = [token.value for token in tokens.colors]
+    candidates = [colour for colour in [body, *palette] if colour and colour != brand]
+    readable = next(
+        (colour for colour in candidates if _contrast(colour, brand) >= HEADER_MIN_CONTRAST), None
+    )
+    if readable is None:
+        return None, body
+    return brand, readable
 
 
 def _body_colour(slot: Slot) -> str | None:
+    """Строки без заливки лежат на фоне слайда — и набираются, как основной текст."""
     return slot.text_style.color if slot.text_style else None
+
+
+def _contrast(first: str, second: str) -> float:
+    """Отношение контраста по WCAG: (светлее + 0,05) / (темнее + 0,05)."""
+    lighter, darker = sorted((_luminance(first), _luminance(second)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _luminance(colour: str) -> float:
+    channels = [int(colour[index : index + 2], 16) / 255 for index in (1, 3, 5)]
+    linear = [
+        value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+        for value in channels
+    ]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]

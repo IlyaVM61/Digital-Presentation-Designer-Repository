@@ -310,3 +310,21 @@ def test_chart_text_is_measured_against_the_slide_background() -> None:
 def test_readable_table_and_chart_are_silent() -> None:
     assert contrast_findings(deck_with(table_element("#000000", VK_BLUE, "#FFFFFF")), schema_on("#000000")) == []
     assert contrast_findings(deck_with(chart_element("#FFFFFF")), schema_on("#000000")) == []
+
+
+def test_html_keeps_the_same_pairs(tmp_path: Path) -> None:
+    """HTML показывает ту же пару, что PPTX: шапку на её заливке, подписи — цветом вёрстки."""
+    from dpd.export import export_html
+
+    deck = RenderedPresentation(
+        variant="A",
+        template_hash="0" * 8,
+        canvas=CANVAS,
+        slides=[
+            Slide(id="s1", layout_id="l1", elements=[table_element("#000000", VK_BLUE, "#FFFFFF")]),
+            Slide(id="s2", layout_id="l1", elements=[chart_element("#EEEEEE")]),
+        ],
+    )
+    page = export_html(deck, schema_on("#000000"), tmp_path / "deck.html").read_text(encoding="utf-8")
+    assert f"background: {VK_BLUE}; color: #000000" in page
+    assert 'fill="#EEEEEE"' in page

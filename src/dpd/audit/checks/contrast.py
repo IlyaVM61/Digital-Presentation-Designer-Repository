@@ -88,43 +88,76 @@ def check_contrast_low(
         background = layout.background
         computable = background.contrast_computable and bool(background.value)
         render = renders.get(number)
-        if not computable and render is None:
-            continue
 
         # Рендер открывается один раз на слайд, а не на каждый прогон текста.
-        picture = None if computable else _load(render)
+        picture = None if computable or render is None else _load(render)
 
         for element in slide.elements:
-            if element.kind != "text":
-                continue
+            for part, colour, smallest, runs, fill in _texts(element):
+                # Под шапкой таблицы — её заливка, код цвета известен и на
+                # фоне-изображении.
+                if fill:
+                    source, behind = "file", fill
+                elif computable:
+                    source, behind = "file", background.value
+                elif picture is not None:
+                    source, behind = "rendered", _behind(picture, element.bounds)
+                else:
+                    continue
 
-            source = "file" if computable else "rendered"
-            behind = background.value if computable else _behind(picture, element.bounds)
-
-            for colour, (smallest, runs) in _by_colour(element).items():
                 ratio = _contrast(colour, behind)
                 required = large_text_ratio if smallest >= large_text_pt else min_ratio
                 if ratio >= required:
                     continue
 
+                where = f"блок «{element.slot_id}»" + (f", {part}" if part else "")
+                under = "заливке" if fill else "фону"
+                evidence = {
+                    "ratio": round(ratio, 2),
+                    "expected": required,
+                    "text": colour,
+                    "background": behind,
+                    "runs": runs,
+                    "measuredBy": "коды цветов" if source == "file" else "пиксели рендера",
+                }
+                if part:
+                    evidence["part"] = part
                 findings.append(
                     SPEC.finding(
-                        f"Слайд {number}, блок «{element.slot_id}»: контраст текста "
-                        f"{colour} к фону {behind} — {ratio:.2f}:1, это ниже {required:g}:1.",
+                        f"Слайд {number}, {where}: контраст текста "
+                        f"{colour} к {under} {behind} — {ratio:.2f}:1, это ниже {required:g}:1.",
                         check_class=source,
                         slide_number=number,
                         slot_id=element.slot_id,
-                        evidence={
-                            "ratio": round(ratio, 2),
-                            "expected": required,
-                            "text": colour,
-                            "background": behind,
-                            "runs": runs,
-                            "measuredBy": "коды цветов" if source == "file" else "пиксели рендера",
-                        },
+                        evidence=evidence,
                     )
                 )
     return findings
+
+
+def _texts(element) -> list[tuple[str | None, str, float, int, str | None]]:
+    """Текст элемента парами с тем, что под ним (T-56).
+
+    Каждая запись — часть элемента, цвет текста, самый мелкий кегль, число
+    прогонов или ячеек и заливка под текстом, если она своя. Таблицы и
+    диаграммы раньше сюда не попадали: проверка смотрела только текстовые
+    блоки, а цвет заливки таблицы и подписей диаграммы вёрстка не задавала —
+    сравнивать было не с чем.
+    """
+    if element.kind == "text":
+        return [(None, colour, smallest, runs, None) for colour, (smallest, runs) in _by_colour(element).items()]
+
+    texts = []
+    table, chart = element.table, element.chart
+    if table is not None:
+        size = table.size_pt or 0.0
+        if table.header_color and any(cell.strip() for cell in table.headers):
+            texts.append(("шапка таблицы", table.header_color, size, len(table.headers), table.header_fill))
+        if table.body_color and any(cell.strip() for row in table.rows for cell in row):
+            texts.append(("строки таблицы", table.body_color, size, len(table.rows), None))
+    if chart is not None and chart.text_color:
+        texts.append(("подписи диаграммы", chart.text_color, chart.size_pt or 0.0, 1, None))
+    return texts
 
 
 def _by_colour(element) -> dict[str, tuple[float, int]]:
