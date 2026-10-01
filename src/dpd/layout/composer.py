@@ -95,7 +95,10 @@ def _compose_slide(
         elements.append(element)
         compensations.extend(applied)
 
-    body_slot = _first_slot(layout, "body")
+    # Самое просторное место, а не первое: по нему выбор макета оценил
+    # макет, и туда же должно лечь содержимое. Первым бывает полоска
+    # надзаголовка — на VK Tech тело резалось в ней до 7 pt (T-60).
+    body_slot = _roomiest_slot(layout)
 
     visual = slide.visualization
     if body_slot is not None and visual is not None and visual.kind == "chart" and visual.chart:
@@ -103,7 +106,7 @@ def _compose_slide(
         styled = body_slot.model_copy(update={"text_style": style})
         chart = build_chart(visual.chart, styled, tokens, _plain_background(layout))
         elements.append(
-            _RE(slot_id=body_slot.id, kind="chart", bounds=body_slot.bounds, chart=chart)
+            _RE(slot_id=body_slot.id, kind="chart", bounds=body_slot.bounds, chart=chart, frame=body_slot.frame)
         )
         return Slide(
             id=slide.id,
@@ -120,7 +123,7 @@ def _compose_slide(
         styled = body_slot.model_copy(update={"text_style": style})
         table, applied = build_table(visual.table, styled, tokens, _plain_background(layout))
         elements.append(
-            _RE(slot_id=body_slot.id, kind="table", bounds=body_slot.bounds, table=table)
+            _RE(slot_id=body_slot.id, kind="table", bounds=body_slot.bounds, table=table, frame=body_slot.frame)
         )
         compensations.extend(applied)
         return Slide(
@@ -133,10 +136,11 @@ def _compose_slide(
 
     body_items = slide.body.items if slide.body else []
     if body_slot is not None and body_items:
-        element, applied = _text_element(
-            body_slot, body_items, tokens, template.canvas, scale, size_shift, decisions
+        columns = _columns(layout, body_slot)
+        placed, applied = _text_columns(
+            columns, body_items, tokens, template.canvas, scale, size_shift, decisions
         )
-        elements.append(element)
+        elements.extend(placed)
         compensations.extend(applied)
 
     return Slide(
@@ -158,6 +162,91 @@ def _first_slot(layout: Layout, kind: str) -> Slot | None:
     return next((slot for slot in layout.slots if slot.kind == kind), None)
 
 
+COLUMN_TOLERANCE = 0.1
+"""На какую долю места под содержимое могут различаться по ширине и высоте,
+чтобы считаться колонками одной сетки, а не полоской рядом с областью."""
+
+
+def _roomiest_slot(layout: Layout) -> Slot | None:
+    """Самое просторное место под содержимое; при равных — первое по разметке."""
+    bodies = [slot for slot in layout.slots if slot.kind == "body"]
+    if not bodies:
+        return None
+    return max(bodies, key=lambda slot: slot.bounds.w * slot.bounds.h)
+
+
+def _columns(layout: Layout, main: Slot) -> list[Slot]:
+    """Колонки сетки, к которой принадлежит самое просторное место.
+
+    Колонка — место под содержимое того же размера, что и самое просторное:
+    так шаблон размечает «две колонки» и «три колонки». Полоска надзаголовка
+    рядом с областью — не колонка. Порядок — порядок чтения: сверху вниз,
+    слева направо.
+    """
+    def alike(slot: Slot) -> bool:
+        return (
+            abs(slot.bounds.w - main.bounds.w) <= COLUMN_TOLERANCE * main.bounds.w
+            and abs(slot.bounds.h - main.bounds.h) <= COLUMN_TOLERANCE * main.bounds.h
+        )
+
+    columns = [slot for slot in layout.slots if slot.kind == "body" and alike(slot)]
+    return sorted(columns, key=lambda slot: (round(slot.bounds.y, 2), slot.bounds.x))
+
+
+def _split(items: list[str], parts: int) -> list[list[str]]:
+    """Разложить пункты по колонкам подряд, поровну; лишние — в первые."""
+    parts = max(min(parts, len(items)), 1)
+    base, extra = divmod(len(items), parts)
+    chunks, start = [], 0
+    for index in range(parts):
+        size = base + (1 if index < extra else 0)
+        chunks.append(items[start : start + size])
+        start += size
+    return chunks
+
+
+def _text_columns(columns: list[Slot], items: list[str], tokens, canvas, scale, size_shift=0, decisions=None):
+    """Уложить тело в колонки сетки по порядку чтения (T-60).
+
+    Тело, занявшее одну колонку из нескольких, оставляло соседние пустыми, а
+    в своей — уходило за нижний край: живой прогон T-58, колонка шириной
+    0,21 холста. Пункты раскладываются по колонкам подряд, а кегль во всех
+    колонках один — наименьший из понадобившихся: колонки одного слайда
+    разным кеглем выглядят ошибкой вёрстки. Выравнивание кегля записывается
+    компенсацией, как любое отклонение от замысла.
+    """
+    chunks = _split(items, len(columns))
+    planned = [
+        _text_element(column, chunk, tokens, canvas, scale, size_shift, decisions)
+        for column, chunk in zip(columns, chunks)
+    ]
+    sizes = [element.runs[0].size_pt for element, _ in planned if element.runs and element.runs[0].size_pt]
+    if len(set(sizes)) <= 1:
+        return [element for element, _ in planned], [item for _, applied in planned for item in applied]
+
+    smallest = min(sizes)
+    elements, compensations = [], []
+    for column, chunk, (element, applied) in zip(columns, chunks, planned):
+        size = element.runs[0].size_pt if element.runs else None
+        if size is None or size == smallest:
+            elements.append(element)
+            compensations.extend(applied)
+            continue
+        original = applied[0].from_value if applied else size
+        runs = [run.model_copy(update={"size_pt": smallest}) for run in element.runs]
+        elements.append(element.model_copy(update={"runs": runs}))
+        compensations.append(
+            Compensation(
+                kind="fontScale",
+                slot_id=column.id,
+                from_value=original,
+                to_value=smallest,
+                reason="кегль выровнен по соседней колонке",
+            )
+        )
+    return elements, compensations
+
+
 def _text_element(slot: Slot, paragraphs: list[str], tokens, canvas, scale, size_shift=0, decisions=None):
     """Уложить текст в слот.
 
@@ -177,6 +266,6 @@ def _text_element(slot: Slot, paragraphs: list[str], tokens, canvas, scale, size
     if not runs:
         runs = [apply(style, paragraph) for paragraph in paragraphs]
     return (
-        RenderedElement(slot_id=slot.id, kind="text", bounds=slot.bounds, runs=runs),
+        RenderedElement(slot_id=slot.id, kind="text", bounds=slot.bounds, runs=runs, frame=slot.frame),
         compensations,
     )

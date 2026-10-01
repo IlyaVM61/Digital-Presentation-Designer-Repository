@@ -30,6 +30,7 @@ from dpd.parsing.background import detect
 from dpd.parsing.cache import load as load_cached
 from dpd.parsing.cache import store as store_cached
 from dpd.parsing.families import classified
+from dpd.parsing.frames import resolve_frame, text_box_frame
 from dpd.parsing.inheritance import StyleResolver
 from dpd.parsing.quality import measure
 from dpd.parsing.slots import (
@@ -41,7 +42,7 @@ from dpd.parsing.slots import (
 from dpd.parsing.tokens import extract_design_tokens
 from dpd.parsing.variants import colour_scheme, group
 
-PARSER_VERSION = "0.2.0"
+PARSER_VERSION = "0.3.0"
 
 _TITLE_PLACEHOLDERS = {PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE}
 _BODY_PLACEHOLDERS = {PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.SUBTITLE, PP_PLACEHOLDER.OBJECT}
@@ -116,6 +117,7 @@ def _parse_layout(layout, master_number: int, canvas: Canvas, resolver: StyleRes
         if bounds is None:
             continue
         kind = _slot_kind(placeholder)
+        style = resolver.resolve_slot(placeholder, layout)
         slots.append(
             Slot(
                 id=_slot_id(kind, counters),
@@ -123,7 +125,8 @@ def _parse_layout(layout, master_number: int, canvas: Canvas, resolver: StyleRes
                 origin="placeholder",
                 bounds=bounds,
                 placeholder_idx=placeholder.placeholder_format.idx,
-                text_style=resolver.resolve_slot(placeholder, layout),
+                text_style=style,
+                frame=resolve_frame(placeholder, layout, canvas, style.size_pt),
             )
         )
 
@@ -148,6 +151,13 @@ def _parse_layout(layout, master_number: int, canvas: Canvas, resolver: StyleRes
     # Цвет текста для слотов, которых нет в разметке, берётся от заголовка:
     # мастер объявляет один цвет на все макеты, включая тёмные.
     inherit_colour_from_title(slots)
+
+    # Слоту без плейсхолдера экспорт создаёт свою текстовую рамку — с полями
+    # по умолчанию и без отступа под маркер (T-60).
+    slots = [
+        slot if slot.frame is not None else slot.model_copy(update={"frame": text_box_frame(canvas)})
+        for slot in slots
+    ]
 
     # Тип выводится из структуры: имена макетов дублируются массово.
     return classified(

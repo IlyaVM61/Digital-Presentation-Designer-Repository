@@ -132,17 +132,23 @@ def _ranked(
         return candidates
 
     suitable = [layout for layout in candidates if _has_content_slot(layout)]
+    cramped: list[Layout] = []
     if needs_visual:
         # Визуализации нужно место: в тесном слоте диаграмма схлопывается до
         # легенды, а таблица — до нечитаемой полоски. Макеты без простора
         # отбрасываются, но только если есть из чего выбирать.
         roomy = [layout for layout in suitable if _content_area(layout) >= MIN_VISUAL_AREA]
-        suitable = roomy or suitable
+        if roomy:
+            # Отброшенные не возвращаются в хвост списка: смещение варианта
+            # перебирает список по кругу и уводило визуализацию вариантов B
+            # и C на тесный макет, когда просторный был один (T-60).
+            cramped = [layout for layout in suitable if layout not in roomy]
+            suitable = roomy
     # Среди равных вперёд идут макеты с большим местом под содержимое.
     # Без этого выбирался макет с крошечным слотом, текст ужимался до
     # нечитаемых семи пунктов, и формально всё было по правилам шаблона.
     suitable.sort(key=_content_area, reverse=True)
-    return suitable + [layout for layout in candidates if layout not in suitable]
+    return suitable + [layout for layout in candidates if layout not in suitable and layout not in cramped]
 
 
 def _reason(layouts: list[Layout], wanted: LayoutFamily, candidate: LayoutFamily) -> str:
