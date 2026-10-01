@@ -6,11 +6,21 @@
 Слой не принимает решений о форме: ни координат, ни цветов, ни кеглей в его
 выходе нет. Результат — `PresentationStructure`.
 
-Реализован детерминированный путь: план, написанный человеком, переводится в
-`PresentationStructure` (T-38). Это не генерация — смысл приносит
-пользователь. Генерация по свободному брифу моделью — задачи T-49 и T-50.
+Два пути. Детерминированный: план, написанный человеком, переводится в
+`PresentationStructure` (T-38) — это не генерация, смысл приносит
+пользователь. Генерация моделью: структура колоды по брифу и контент-пакету
+(T-49); содержание слайдов со ссылками на источник — задача T-50.
 """
 
+from dpd.generation.content_pack import ContentPack, load_content_pack
 from dpd.generation.outline import structure_from_outline
+from dpd.generation.structure import DEFAULT_SLIDE_RANGE, STRUCTURE_STAGE, generate_structure
 
-__all__ = ["structure_from_outline"]
+__all__ = [
+    "DEFAULT_SLIDE_RANGE",
+    "STRUCTURE_STAGE",
+    "ContentPack",
+    "generate_structure",
+    "load_content_pack",
+    "structure_from_outline",
+]

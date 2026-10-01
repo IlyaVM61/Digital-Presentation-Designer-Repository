@@ -21,6 +21,23 @@ from dpd.models.common import Contract
 
 BodyKind = Literal["bullets", "paragraphs"]
 
+SlideRole = Literal[
+    "title",
+    "cover",
+    "agenda",
+    "section",
+    "divider",
+    "data",
+    "quote",
+    "process",
+    "comparison",
+    "summary",
+    "closing",
+]
+"""Роли, которые понимает выбор макета. Генерация (T-49) выдаёт только их:
+роль вне словаря вёрстка молча считает контентной, и замысел модели терялся
+бы без следа. Совпадение с таблицей выбора макета проверяет тест."""
+
 
 class StructureMeta(Contract):
     """Свойства колоды целиком."""
