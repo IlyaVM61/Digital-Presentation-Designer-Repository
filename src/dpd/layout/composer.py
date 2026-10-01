@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dpd.layout.charts import build as build_chart
 from dpd.layout.overflow import plan_compensations
-from dpd.layout.selector import select
+from dpd.layout.selector import roomiest_slot, select
 from dpd.layout.styling import apply, style_for
 from dpd.layout.tables import build as build_table
 from dpd.models import (
@@ -98,7 +98,7 @@ def _compose_slide(
     # Самое просторное место, а не первое: по нему выбор макета оценил
     # макет, и туда же должно лечь содержимое. Первым бывает полоска
     # надзаголовка — на VK Tech тело резалось в ней до 7 pt (T-60).
-    body_slot = _roomiest_slot(layout)
+    body_slot = roomiest_slot(layout)
 
     visual = slide.visualization
     if body_slot is not None and visual is not None and visual.kind == "chart" and visual.chart:
@@ -165,14 +165,6 @@ def _first_slot(layout: Layout, kind: str) -> Slot | None:
 COLUMN_TOLERANCE = 0.1
 """На какую долю места под содержимое могут различаться по ширине и высоте,
 чтобы считаться колонками одной сетки, а не полоской рядом с областью."""
-
-
-def _roomiest_slot(layout: Layout) -> Slot | None:
-    """Самое просторное место под содержимое; при равных — первое по разметке."""
-    bodies = [slot for slot in layout.slots if slot.kind == "body"]
-    if not bodies:
-        return None
-    return max(bodies, key=lambda slot: slot.bounds.w * slot.bounds.h)
 
 
 def _columns(layout: Layout, main: Slot) -> list[Slot]:

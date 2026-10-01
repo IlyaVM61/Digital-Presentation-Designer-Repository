@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from dpd.models import Layout, LayoutDecision, LayoutFamily, StructureSlide
+from dpd.models import Layout, LayoutDecision, LayoutFamily, Slot, StructureSlide
 
 ROLE_TO_FAMILY: dict[str, LayoutFamily] = {
     "title": "title",
@@ -111,6 +111,17 @@ MIN_VISUAL_AREA = 0.12
 легенды — столбцов не оставалось вовсе. Таблице и диаграмме нужно место,
 которого абзацу текста хватило бы."""
 
+MIN_VISUAL_HEIGHT = 0.4
+"""Доля высоты холста, ниже которой диаграмма сплющивается (T-60).
+
+Площади мало: полоса во всю ширину проходит порог площади, а диаграмма в
+ней — полоска с подписями. Замер на двух калибровочных холстах разного
+размера (`D:/dpd-out/t60/heights-*`): при высоте рамки 0,1–0,15 холста
+остаётся один заголовок диаграммы, при 0,2–0,3 пропадает подпись категории,
+с 0,4 диаграмма читается целиком. Так выглядели сплющенные диаграммы
+вариантов B и C в T-59. Кегль подписей следует за кеглем шаблона, а тот —
+за холстом, поэтому порог — доля холста, а не пункты."""
+
 
 def _ranked(
     layouts: list[Layout],
@@ -137,7 +148,7 @@ def _ranked(
         # Визуализации нужно место: в тесном слоте диаграмма схлопывается до
         # легенды, а таблица — до нечитаемой полоски. Макеты без простора
         # отбрасываются, но только если есть из чего выбирать.
-        roomy = [layout for layout in suitable if _content_area(layout) >= MIN_VISUAL_AREA]
+        roomy = [layout for layout in suitable if _fits_visual(layout)]
         if roomy:
             # Отброшенные не возвращаются в хвост списка: смещение варианта
             # перебирает список по кругу и уводило визуализацию вариантов B
@@ -162,9 +173,27 @@ def _has_content_slot(layout: Layout) -> bool:
     return any(slot.kind == "body" for slot in layout.slots)
 
 
+def roomiest_slot(layout: Layout) -> Slot | None:
+    """Самое просторное место под содержимое; при равных — первое по разметке.
+
+    Общее для выбора макета и вёрстки: макет оценивается по этому месту, и
+    содержимое ложится в него же. Вёрстка клала в первое место под тело — на
+    VK Tech это полоска надзаголовка высотой 5% холста, и тело резалось в
+    ней до 7 pt, хотя макет выбран за просторную область рядом (T-60).
+    """
+    bodies = [slot for slot in layout.slots if slot.kind == "body"]
+    if not bodies:
+        return None
+    return max(bodies, key=lambda slot: slot.bounds.w * slot.bounds.h)
+
+
 def _content_area(layout: Layout) -> float:
     """Площадь самого просторного места под содержимое, в долях холста."""
-    areas = [
-        slot.bounds.w * slot.bounds.h for slot in layout.slots if slot.kind == "body"
-    ]
-    return max(areas, default=0.0)
+    slot = roomiest_slot(layout)
+    return slot.bounds.w * slot.bounds.h if slot else 0.0
+
+
+def _fits_visual(layout: Layout) -> bool:
+    """Хватит ли самого просторного места диаграмме или таблице: и по площади, и по высоте."""
+    slot = roomiest_slot(layout)
+    return slot is not None and _content_area(layout) >= MIN_VISUAL_AREA and slot.bounds.h >= MIN_VISUAL_HEIGHT

@@ -407,6 +407,26 @@ def test_variant_offset_keeps_a_chart_on_a_roomy_layout() -> None:
         assert chosen.id == "m/roomy", f"смещение {offset} увело диаграмму на тесный макет"
 
 
+def test_wide_strip_is_not_room_for_a_chart() -> None:
+    """Площади мало: полоса во всю ширину просторна по площади, но диаграмма в ней сплющена.
+
+    Замер на двух калибровочных холстах (`D:/dpd-out/t60/heights-*`): при высоте
+    рамки 0,3 холста у столбчатой диаграммы пропадает подпись категории, при
+    0,1–0,15 остаётся один заголовок; читается она с 0,4. Полоса 0,9 × 0,3 по
+    площади больше колонки 0,4 × 0,6, и прежнее правило выбирало её.
+    """
+    strip = Layout(
+        id="m/strip", name="Полоса", family="content",
+        slots=[TITLE, _slot("body-1", "body", 0.05, 0.2, 0.9, 0.3)],
+    )
+    column = Layout(
+        id="m/column", name="Колонка", family="content",
+        slots=[TITLE, _slot("body-1", "body", 0.05, 0.2, 0.4, 0.6)],
+    )
+    chosen, _ = select(_chart_slide().slides[0], [strip, column])
+    assert chosen.id == "m/column"
+
+
 # --- Исходный случай: отладочная Jessica ------------------------------------
 
 
