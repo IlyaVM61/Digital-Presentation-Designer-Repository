@@ -73,6 +73,9 @@ D:\venvs\dpd\Scripts\streamlit run ui/app.py
 # --content-pack КАТАЛОГ — другой пакет, --outline ПЛАН.txt — план человека, без модели и офлайн
 D:\venvs\dpd\Scripts\python -m dpd.batch
 
+# End-to-end на неизвестном шаблоне: тот же батч, перечень из одного приёмочного шаблона
+D:\venvs\dpd\Scripts\python -m dpd.batch --matrix configs/acceptance.yaml --out $DPD_OUTPUT_DIR/out/acceptance
+
 # Тесты
 D:\venvs\dpd\Scripts\pytest
 ```

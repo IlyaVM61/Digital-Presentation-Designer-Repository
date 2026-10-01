@@ -95,6 +95,27 @@ def test_matrix_names_the_three_calibration_templates() -> None:
     assert all(template.suffix == ".pptx" for _, template in matrix)
 
 
+ACCEPTANCE_MATRIX = batch.ROOT / "configs" / "acceptance.yaml"
+ACCEPTANCE_DIR = batch.ROOT / "assets" / "templates" / "acceptance"
+
+
+def test_acceptance_run_names_the_external_template_only() -> None:
+    """T-43: прогон на приёмочном шаблоне — тот же батч с другим перечнем.
+
+    Шаблон в тестах не разбирается: настроенный на нём тест перестал бы
+    быть доказательством универсальности (правило 7 CLAUDE.md).
+    """
+    matrix = load_matrix(ACCEPTANCE_MATRIX)
+    assert [slug for slug, _ in matrix] == ["external"]
+    template = matrix[0][1]
+    assert template.parent == ACCEPTANCE_DIR
+    assert template.is_file()
+
+
+def test_acceptance_template_stays_out_of_the_nine_decks() -> None:
+    assert all(template.parent != ACCEPTANCE_DIR for _, template in load_matrix())
+
+
 def test_deck_name_follows_the_deliverables_scheme() -> None:
     assert deck_name("vk-tech", "A") == "vk-tech__a"
     assert deck_name("vk-education", "c") == "vk-education__c"

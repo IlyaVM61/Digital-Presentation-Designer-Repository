@@ -1,0 +1,22 @@
+# Прогон на приёмочном шаблоне (T-43): end-to-end на неизвестном шаблоне.
+#
+# Тот же батч, что собирает девять колод, с другим перечнем:
+#
+#   python -m dpd.batch --matrix configs/acceptance.yaml --out <DPD_OUTPUT_DIR>/out/acceptance
+#
+# Слаг `external` даёт имена по схеме сдачи (`docs/08-backlog/deliverables.md`):
+# `external__a.pptx` и отчёт аудита `external__a.report.json`.
+#
+# Приёмочный шаблон не используется для настройки и отладки (правило 7
+# CLAUDE.md): найденное на нём записывается в handoff, а не подгоняется в
+# коде. В перечень девяти колод (`configs/decks.yaml`) он не входит.
+#
+# Версия: 1. Изменения фиксируются здесь же.
+
+version: 1
+
+templates_dir: assets/templates/acceptance
+
+templates:
+  - slug: external
+    file: Jessica · SlidesCarnival.pptx
