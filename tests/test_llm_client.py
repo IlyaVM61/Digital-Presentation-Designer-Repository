@@ -243,6 +243,30 @@ def test_exhausted_attempts_raise_an_error_naming_the_stage() -> None:
     assert "Headline" in message
 
 
+def test_exhausted_attempts_hand_over_the_last_answer() -> None:
+    """T-61: ответ, не прошедший проверку, не пропадает вместе с ошибкой —
+    слой генерации решает, можно ли сохранить из него слайд. Сбой провайдера
+    на последней попытке не стирает ответ предыдущей: так оборвался третий
+    запрос в диагностике T-59."""
+    last = '{"title": "Выручка выросла", "itemCount": 0}'
+    provider = Provider(answer("мусор"), answer(last), httpx.Response(503, text="перегружен"))
+
+    with pytest.raises(ModelError) as caught:
+        ask(client(provider))
+
+    assert caught.value.answer == last
+
+
+def test_error_without_any_answer_hands_over_nothing() -> None:
+    timeout = httpx.ReadTimeout("слишком долго")
+    provider = Provider(timeout, timeout, timeout)
+
+    with pytest.raises(ModelError) as caught:
+        ask(client(provider))
+
+    assert caught.value.answer is None
+
+
 def test_truncated_answer_is_reported_as_truncation() -> None:
     """Обрезанный по лимиту JSON — не каприз модели, а нехватка `max_tokens`."""
     cut = answer('{"title": "Выруч', finish="length")
