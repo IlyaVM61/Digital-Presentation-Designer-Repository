@@ -69,8 +69,9 @@ D:\venvs\dpd\Scripts\streamlit run ui/app.py
 
 # Девять демонстрационных колод одной командой: шаблоны из configs/decks.yaml,
 # результат в $DPD_OUTPUT_DIR/out — decks/ (pptx, pdf, html) и audit/
-# Пока содержание — план колоды, написанный человеком; вход из контент-пакета появится с генерацией (T-50)
-D:\venvs\dpd\Scripts\python -m dpd.batch --outline ПЛАН.txt
+# Содержание генерирует модель по контент-пакету assets/content-pack/ (нужен LLM_API_KEY в .env);
+# --content-pack КАТАЛОГ — другой пакет, --outline ПЛАН.txt — план человека, без модели и офлайн
+D:\venvs\dpd\Scripts\python -m dpd.batch
 
 # Тесты
 D:\venvs\dpd\Scripts\pytest
