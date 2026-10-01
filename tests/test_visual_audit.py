@@ -201,16 +201,43 @@ def test_card_lists_what_the_layout_put_on_the_slide(tmp_path: Path) -> None:
     assert chart["axisTitles"] == {"category": "Квартал", "value": "Пары"}
 
 
+def unreadable(element: int, text: str, problem: str = "Не видно на заливке") -> dict:
+    return {"readability": [{"element": element, "text": text, "problem": problem}], "offTopicPictures": []}
+
+
 def test_element_number_is_constrained_by_the_schema() -> None:
     """Номер элемента — перечисление в схеме: провайдер держит её при
     декодировании, и замечание не укажет на блок, которого нет."""
     slide = sample().slides[1]
     contract = look_contract(slide)
 
-    contract.model_validate({"readability": [{"element": 2, "problem": "Шапки не видно"}], "offTopicPictures": []})
+    contract.model_validate(unreadable(2, "Показатель"))
     with pytest.raises(ValidationError):
-        contract.model_validate({"readability": [{"element": 3, "problem": "Шапки не видно"}], "offTopicPictures": []})
+        contract.model_validate(unreadable(3, "Показатель"))
     assert contract.model_json_schema()["$defs"]["Unreadable"]["properties"]["element"]["enum"] == [1, 2]
+
+
+def test_unreadable_text_is_quoted_from_its_element() -> None:
+    """Живой прогон v1: без цитаты модель «находила» перекрытый и обрезанный
+    текст на слайдах, где всё читается, и пропускала невидимую шапку таблицы.
+    Цитата из списка — проверяемое утверждение: строка этого блока, которую
+    на изображении не прочесть."""
+    contract = look_contract(sample().slides[1])
+
+    contract.model_validate(unreadable(2, "показатель"))
+    contract.model_validate(unreadable(2, "«78%»"))
+    with pytest.raises(ValidationError, match="нет в элементе 1"):
+        contract.model_validate(unreadable(1, "Показатель"))
+    with pytest.raises(ValidationError, match="дословно"):
+        contract.model_validate(unreadable(2, ""))
+
+
+def test_chart_scale_labels_need_no_quote() -> None:
+    """Подписи шкалы диаграмма рисует сама, в списке их нет — цитировать нечего."""
+    contract = look_contract(sample().slides[2])
+
+    contract.model_validate(unreadable(2, "", "Цифры шкалы сливаются с фоном"))
+    contract.model_validate(unreadable(2, "Квартал"))
 
 
 def test_slide_without_content_has_nothing_to_be_unreadable() -> None:
@@ -218,7 +245,7 @@ def test_slide_without_content_has_nothing_to_be_unreadable() -> None:
 
     contract.model_validate(clean())
     with pytest.raises(ValidationError):
-        contract.model_validate({"readability": [{"element": 1, "problem": "Мелко"}], "offTopicPictures": []})
+        contract.model_validate(unreadable(1, "Мелко"))
 
 
 def test_slide_failing_the_contract_stops_the_stage(tmp_path: Path) -> None:
@@ -242,8 +269,8 @@ def test_images_must_match_the_slides(tmp_path: Path) -> None:
 
 
 def test_unreadable_block_becomes_a_finding_on_that_block(tmp_path: Path) -> None:
-    problem = "Шапки таблицы не видно: текст того же цвета, что заливка"
-    provider = Provider({2: [{"readability": [{"element": 2, "problem": problem}], "offTopicPictures": []}]})
+    problem = "Текста не видно: он того же цвета, что заливка"
+    provider = Provider({2: [unreadable(2, "Показатель", problem)]})
 
     report = audit_visual(sample(), pictures(tmp_path), client(provider), load_prompts())
 
@@ -251,8 +278,9 @@ def test_unreadable_block_becomes_a_finding_on_that_block(tmp_path: Path) -> Non
     assert finding.check_id == READABILITY
     assert (finding.check_class, finding.severity, finding.fixability) == ("model", "advice", "lossy")
     assert (finding.slide_number, finding.slot_id) == (2, "body")
-    assert problem in finding.message
+    assert problem in finding.message and "«Показатель»" in finding.message
     assert finding.evidence["slideId"] == "s2"
+    assert finding.evidence["text"] == "Показатель"
 
 
 def test_picture_off_the_topic_is_a_warning(tmp_path: Path) -> None:
@@ -313,7 +341,7 @@ def test_visual_report_goes_after_the_variant_findings(tmp_path: Path) -> None:
     assert {IMAGERY, READABILITY} <= set(variant.checks_skipped)
 
     problem = "Подписи осей сливаются с фоном"
-    provider = Provider({3: [{"readability": [{"element": 2, "problem": problem}], "offTopicPictures": []}]})
+    provider = Provider({3: [unreadable(2, "Квартал", problem)]})
     seen = attach(variant, audit_visual(sample(), pictures(tmp_path), client(provider), load_prompts()), sample())
 
     assert [f.check_id for f in seen.findings] == ["density.too_many_bullets", READABILITY]

@@ -54,13 +54,14 @@ def check_visual_readability(deck: RenderedPresentation, visual_review: VisualRe
     findings: list[Finding] = []
     for number, (slide, look) in enumerate(zip(deck.slides, visual_review.slides, strict=True), start=1):
         for issue in look.readability:
-            problem = issue.problem.strip()
+            problem, text = issue.problem.strip(), issue.text.strip()
+            lead = f"Не читается «{text}»" if text else "Слайд трудно прочитать"
             findings.append(
                 VISUAL_READABILITY.finding(
-                    f"Слайд трудно прочитать: {problem}",
+                    f"{lead}: {problem}",
                     slide_number=number,
                     slot_id=slide.elements[issue.element - 1].slot_id,
-                    evidence={"slideId": slide.id, "element": issue.element, "problem": problem},
+                    evidence={"slideId": slide.id, "element": issue.element, "text": text, "problem": problem},
                 )
             )
     return findings

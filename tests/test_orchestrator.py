@@ -512,7 +512,7 @@ def fake_render(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
 
 
 def vision(requests: list[dict]):
-    """VLM-подделка: на каждом слайде шапку не видно."""
+    """VLM-подделка: на каждом слайде заголовок сливается с фоном."""
     import json
 
     import httpx
@@ -520,8 +520,12 @@ def vision(requests: list[dict]):
     from dpd.llm import ModelClient, ModelSettings, load_prompts
 
     def reply(request: httpx.Request) -> httpx.Response:
-        requests.append(json.loads(request.content))
-        content = {"readability": [{"element": 1, "problem": "Заголовок сливается с фоном"}], "offTopicPictures": []}
+        body = json.loads(request.content)
+        requests.append(body)
+        [part] = [item for item in body["messages"][1]["content"] if item["type"] == "text"]
+        title = json.loads(part["text"])["elements"][0]["text"][0]
+        problem = "Заголовок сливается с фоном"
+        content = {"readability": [{"element": 1, "text": title, "problem": problem}], "offTopicPictures": []}
         message = {"role": "assistant", "content": json.dumps(content, ensure_ascii=False)}
         return httpx.Response(200, json={"choices": [{"message": message, "finish_reason": "stop"}]})
 

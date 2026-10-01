@@ -13,6 +13,13 @@
 элемента — перечисление в схеме ответа, — и находка получает его блок:
 подсветка покажет место, а не весь слайд.
 
+**Нечитаемый текст цитируется из списка дословно**, и контракт сверяет
+цитату с текстом этого элемента. Живой прогон без цитаты (промпт v1) дал
+худшее из двух: на тёмном шаблоне модель «находила» перекрытый и обрезанный
+текст там, где всё читается, а на светлом пропустила шапку таблицы цвета
+заливки. Цитата превращает замечание в проверяемое утверждение. Без неё —
+только подписи шкалы диаграммы: их рисует сама диаграмма, в списке их нет.
+
 **Смотрится вариант, который выбран, — после выбора** (ADR-0002, п. 4).
 С T-39 вариант выбирают, посмотрев на все три, и прогон модель не зовёт:
 три варианта стоили бы втрое больше запросов при том, что экспортируют
@@ -34,7 +41,10 @@ from typing import Literal
 
 from pydantic import Field, create_model
 
+from pydantic import model_validator
+
 from dpd.audit.registry import AuditContext, run_checks
+from dpd.audit.textual import plain
 from dpd.llm import ModelClient, PromptSet
 from dpd.models import AuditReport, RenderedPresentation
 from dpd.models.common import Contract
@@ -49,9 +59,10 @@ DEFAULT_WORKERS = 4
 
 
 class Unreadable(Contract):
-    """Элемент слайда, который трудно прочитать или который выглядит случайным."""
+    """Текст элемента, который на изображении не прочесть: дословно из списка."""
 
     element: int
+    text: str
     problem: str = Field(min_length=1)
 
 
@@ -91,8 +102,45 @@ def look_contract(slide: Slide) -> type[SlideLook]:
         return create_model(  # type: ignore[call-overload]
             "SlideLook", __base__=SlideLook, readability=(list[Unreadable], Field(max_length=0))
         )
+    texts = {number: [plain(text) for text in element_texts(element)] for number, element in enumerate(slide.elements, start=1)}
+    charts = {number for number, element in enumerate(slide.elements, start=1) if element.chart is not None}
+
+    def check(look: SlideLook) -> SlideLook:
+        # Правило вне схемы: его держит не провайдер, а повтор клиента.
+        problems: list[str] = []
+        for issue in look.readability:
+            quote = plain(issue.text)
+            if not quote and issue.element not in charts:
+                problems.append(
+                    f"readability: у элемента {issue.element} нужна строка из списка дословно — "
+                    "без цитаты можно только о подписях шкалы диаграммы"
+                )
+            elif quote and not any(quote in text for text in texts[issue.element]):
+                problems.append(
+                    f"readability: «{issue.text}» нет в элементе {issue.element} — нужна его строка из списка дословно"
+                )
+        if problems:
+            raise ValueError("; ".join(problems))
+        return look
+
     unreadable = create_model("Unreadable", __base__=Unreadable, element=(Literal[numbers], ...))  # type: ignore[valid-type]
-    return create_model("SlideLook", __base__=SlideLook, readability=(list[unreadable], ...))  # type: ignore[valid-type]
+    return create_model(
+        "SlideLook",
+        __base__=SlideLook,
+        __validators__={"quoted_from_elements": model_validator(mode="after")(check)},
+        readability=(list[unreadable], ...),  # type: ignore[valid-type]
+    )
+
+
+def element_texts(element: RenderedElement) -> list[str]:
+    """Строки элемента в карточке: текст, ячейки таблицы, подписи диаграммы."""
+    if element.table is not None:
+        return [*element.table.headers, *(cell for row in element.table.rows for cell in row)]
+    if element.chart is not None:
+        chart = element.chart
+        titles = chart.axis_titles
+        return [*chart.categories, *(series.name for series in chart.series), *filter(None, (titles.category, titles.value))]
+    return [run.text for run in element.runs if run.text.strip()]
 
 
 def elements_card(slide: Slide) -> list[dict]:
@@ -197,6 +245,7 @@ __all__ = [
     "Unreadable",
     "VisualReview",
     "audit_visual",
+    "element_texts",
     "elements_card",
     "look_contract",
     "review_visual",
