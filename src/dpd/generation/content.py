@@ -238,7 +238,13 @@ def _untraced_numbers(content: SlideContent, numbers: dict[str, set[str]]) -> li
                 continue
             holders = [anchor for anchor, found in numbers.items() if number in found]
             if holders:
-                problems.append(f"{where}: число {raw} есть в разделах {', '.join(holders)}, а их нет в sourceRefs")
+                # Совпадение бывает случайным — «5 частей» у плана колоды, —
+                # поэтому выходов два, а не один: подсказка только про ссылку
+                # загоняла модель в рассуждение до лимита токенов.
+                problems.append(
+                    f"{where}: число {raw} есть в разделах {', '.join(holders)}, а их нет в sourceRefs — "
+                    "нужна ссылка на раздел, если число взято оттуда, или формулировка без числа"
+                )
             else:
                 problems.append(
                     f"{where}: числа {raw} нет в фактуре — числа переносятся из неё как есть, "

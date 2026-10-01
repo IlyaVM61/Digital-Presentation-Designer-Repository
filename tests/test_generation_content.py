@@ -322,6 +322,18 @@ def test_wrong_content_is_repaired_by_a_second_request(wrong: str, reason: str) 
     assert result.slides[1].body.items == ["Удержание выросло с 78% до 89%"]
 
 
+def test_number_from_another_section_may_be_cited_or_dropped() -> None:
+    """Найдено живым прогоном: у слайда плана «5 частей» совпало с числом
+    раздела «Контекст». Подсказка «сошлись на раздел» была бессмысленной для
+    плана, и модель дважды ушла в рассуждение до лимита в 8000 токенов."""
+    wrong = answer(body=["Колода из 61 части"], refs=[RESULTS])
+    provider = regular(s2=[wrong, content_answer()])
+    generate(provider)
+
+    repair = provider.for_slide(2)[1]["messages"][3]["content"]
+    assert SCALE in repair and "без числа" in repair
+
+
 def test_title_slide_with_a_body_is_repaired() -> None:
     """Тело перевело бы титульный слайд на контентный макет."""
     wrong = answer(headline="Программа наставничества", body=["Подзаголовок"], refs=[RESULTS])
