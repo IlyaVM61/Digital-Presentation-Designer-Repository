@@ -9,3 +9,8 @@
 Это прямое требование ТЗ (п. 2.4); версия набора попадает в `AuditReport`
 каждого прогона, иначе утверждение о воспроизводимости непроверяемо.
 """
+
+from dpd.llm.client import ModelClient, ModelError
+from dpd.llm.settings import ModelSettings, load_settings
+
+__all__ = ["ModelClient", "ModelError", "ModelSettings", "load_settings"]

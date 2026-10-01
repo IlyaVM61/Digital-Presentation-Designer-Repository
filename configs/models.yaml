@@ -1,0 +1,60 @@
+# Модели и параметры запросов к ним.
+#
+# Две роли: `llm` пишет смысл — структуру колоды и тексты, `vlm` смотрит на
+# отрисованный слайд. Переменные окружения {РОЛЬ}_BASE_URL, {РОЛЬ}_MODEL и
+# {РОЛЬ}_API_KEY сильнее этого файла: переход на инференс организаторов
+# делается через .env, без правки конфига и кода. Ключ VLM по умолчанию тот же,
+# что у LLM.
+#
+# temperature 0 и фиксированный seed уменьшают разброс между прогонами, но
+# полной воспроизводимости не дают: её мы заявляем только для
+# детерминированной части (NFR-6).
+#
+# max_attempts — сколько раз клиент просит модель исправить ответ, не
+# прошедший проверку по схеме, прежде чем остановить этап с ошибкой (EF-8).
+# Сбои провайдера — таймаут, HTTP 429 и 5xx — расходуют те же попытки, с
+# паузой retry_delay_sec между ними.
+#
+# extra — параметры, которые понимает только конкретный провайдер; они
+# добавляются в тело запроса как есть. Для OpenRouter:
+#
+#   reasoning.enabled: false — Qwen3 рассуждающая. Замер 2026-10-01 на
+#     qwen/qwen3-32b, один и тот же запрос со схемой ответа: с рассуждением
+#     22 с и 598 токенов вывода, без него 2–4 с и 28 токенов. Бюджет —
+#     5 минут на полный цикл (D4), поэтому по умолчанию рассуждение выключено.
+#   provider.require_parameters: true — направлять запрос только тем
+#     провайдерам, что выполняют все его параметры, включая response_format.
+#     Иначе схема ответа может быть молча проигнорирована.
+#
+# Для локального vLLM с Qwen3 рассуждение выключается иначе:
+#   extra: {chat_template_kwargs: {enable_thinking: false}}
+#
+# Версия: 1.
+
+version: 1
+
+roles:
+  llm:
+    base_url: https://openrouter.ai/api/v1
+    model: qwen/qwen3-32b
+    temperature: 0
+    seed: 42
+    max_tokens: 8000
+    timeout_sec: 120
+    max_attempts: 3
+    retry_delay_sec: 2
+    extra:
+      reasoning: {enabled: false}
+      provider: {require_parameters: true}
+
+  vlm:
+    base_url: https://openrouter.ai/api/v1
+    model: qwen/qwen3-vl-32b-instruct
+    temperature: 0
+    seed: 42
+    max_tokens: 2000
+    timeout_sec: 120
+    max_attempts: 3
+    retry_delay_sec: 2
+    extra:
+      provider: {require_parameters: true}
