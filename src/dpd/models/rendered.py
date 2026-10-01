@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from dpd.models.common import Bounds, Canvas, Contract, TextRun
+from dpd.models.common import Bounds, Canvas, Contract, TextFrame, TextRun
 from dpd.models.structure import AxisTitles, ChartSeries
 from dpd.models.template import LayoutFamily
 
@@ -57,7 +57,11 @@ class RenderedChart(Contract):
 
 
 class RenderedElement(Contract):
-    """Содержимое, уложенное в слот, с окончательной геометрией в долях."""
+    """Содержимое, уложенное в слот, с окончательной геометрией в долях.
+
+    `frame` переходит от слота: проверка переполнения считает вместимость
+    той же метрикой, что вёрстка, а слота у неё под рукой нет (T-60).
+    """
 
     slot_id: str
     kind: ElementKind
@@ -65,6 +69,7 @@ class RenderedElement(Contract):
     runs: list[TextRun] = Field(default_factory=list)
     table: RenderedTable | None = None
     chart: RenderedChart | None = None
+    frame: TextFrame | None = None
 
 
 class LayoutDecision(Contract):

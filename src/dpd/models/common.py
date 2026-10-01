@@ -63,3 +63,29 @@ class TextRun(Contract):
     size_pt: float | None = Field(default=None, gt=0)
     color: str | None = Field(default=None, pattern=HEX_COLOR)
     bold: bool = False
+
+
+class TextFrame(Contract):
+    """Что отнимает у текста место внутри рамки слота (T-60).
+
+    Поля рамки (`bodyPr`: `lIns`, `rIns`, `tIns`, `bIns`) и отступ текста
+    абзаца первого уровня (`marL`) — доли холста, как любая геометрия схемы:
+    левое, правое поле и отступ — доли ширины, верхнее и нижнее — доли
+    высоты. Межстрочный интервал — множитель (`spcPct`) либо точное значение
+    в пунктах (`spcPts`), отбивки абзацев — в пунктах, как кегль.
+
+    Без них вместимость считалась по всей рамке: в колонке шириной 0,21
+    холста отступ под маркер в полдюйма отнимал четверть строки, интервал
+    115% — седьмую часть высоты, и список уходил за нижний край, а аудит
+    молчал (вопрос T22).
+    """
+
+    inset_left: float = Field(default=0.0, ge=0, le=1)
+    inset_right: float = Field(default=0.0, ge=0, le=1)
+    inset_top: float = Field(default=0.0, ge=0, le=1)
+    inset_bottom: float = Field(default=0.0, ge=0, le=1)
+    indent: float = Field(default=0.0, ge=0, le=1)
+    line_spacing: float = Field(default=1.0, gt=0)
+    line_spacing_pt: float | None = Field(default=None, gt=0)
+    space_before_pt: float = Field(default=0.0, ge=0)
+    space_after_pt: float = Field(default=0.0, ge=0)

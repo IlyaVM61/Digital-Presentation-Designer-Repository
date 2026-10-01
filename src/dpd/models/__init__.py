@@ -22,7 +22,7 @@ from dpd.models.audit import (
     Fixability,
     Severity,
 )
-from dpd.models.common import Bounds, Canvas, Contract, TextRun
+from dpd.models.common import Bounds, Canvas, Contract, TextFrame, TextRun
 from dpd.models.rendered import (
     Compensation,
     Decision,
@@ -110,6 +110,7 @@ __all__ = [
     "TableSpec",
     "TemplateSchema",
     "TemplateSource",
+    "TextFrame",
     "TextRun",
     "TextStyle",
     "Token",

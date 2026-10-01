@@ -32,12 +32,7 @@ from math import ceil
 from dpd.audit.fixer import slide_of
 from dpd.audit.registry import CheckSpec, check, param
 from dpd.audit.remedies import remedy
-from dpd.layout.overflow import (
-    AVERAGE_GLYPH_WIDTH,
-    EMU_PER_INCH,
-    LINE_HEIGHT,
-    POINTS_PER_INCH,
-)
+from dpd.layout.overflow import room_height, text_height
 from dpd.models import (
     Canvas,
     Finding,
@@ -410,12 +405,12 @@ def _occupied(element: RenderedElement, canvas: Canvas) -> float:
     if element.kind != "text" or not element.runs:
         return frame
 
+    # Метрика вёрстки, а не своя: две разошлись бы, и заполнение считалось
+    # бы по одной высоте строки, а переполнение — по другой (T-60).
     size = max((run.size_pt for run in element.runs if run.size_pt), default=14.0)
-    width_pt = element.bounds.w * canvas.width_emu / EMU_PER_INCH * POINTS_PER_INCH
-    height_pt = element.bounds.h * canvas.height_emu / EMU_PER_INCH * POINTS_PER_INCH
-
-    per_line = max(int(width_pt / (size * AVERAGE_GLYPH_WIDTH)), 1)
-    available = max(int(height_pt / (size * LINE_HEIGHT)), 1)
-    needed = sum(max(1, -(-len(run.text) // per_line)) for run in element.runs)
-
-    return frame * min(needed / available, 1.0)
+    paragraphs = [run.text for run in element.runs]
+    room = room_height(element.bounds, canvas, element.frame)
+    if room <= 0:
+        return frame
+    needed = text_height(paragraphs, element.bounds, canvas, size, element.frame)
+    return frame * min(needed / room, 1.0)

@@ -194,7 +194,7 @@ def check_text_overflow(deck: RenderedPresentation) -> list[Finding]:
     for number, slide in enumerate(deck.slides, start=1):
         for element in _text_elements(slide.elements):
             paragraphs, size = _paragraphs(element)
-            if text_fits(paragraphs, element.bounds, deck.canvas, size):
+            if text_fits(paragraphs, element.bounds, deck.canvas, size, element.frame):
                 continue
             findings.append(
                 TEXT_OVERFLOW.finding(
@@ -227,9 +227,9 @@ def check_text_clipped(deck: RenderedPresentation, tolerance: float | None = Non
                 continue
 
             paragraphs, size = _paragraphs(element)
-            if not text_fits(paragraphs, element.bounds, deck.canvas, size):
+            if not text_fits(paragraphs, element.bounds, deck.canvas, size, element.frame):
                 continue
-            if text_fits(paragraphs, visible, deck.canvas, size):
+            if text_fits(paragraphs, visible, deck.canvas, size, element.frame):
                 continue
 
             findings.append(

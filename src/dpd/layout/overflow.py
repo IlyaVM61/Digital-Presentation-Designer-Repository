@@ -15,12 +15,18 @@
 приблизительна и намеренно осторожна — лучше уменьшить кегль лишний раз,
 чем выпустить текст за край.
 
+**Место считается за вычетом того, что его отнимает** (T-60): полей рамки,
+отступа абзаца под маркер, межстрочного интервала и отбивок шаблона — они
+приходят из `TextFrame` слота. Строка переносится по словам, а не делится
+по числу знаков. Без этого в колонке шириной 0,21 холста четвёртый пункт
+уходил за нижний край, а метрика считала, что всё помещается.
+
 Слой детерминированный: моделей не вызывает.
 """
 
 from __future__ import annotations
 
-from dpd.models import Bounds, Canvas, Compensation, Slot, TextRun
+from dpd.models import Bounds, Canvas, Compensation, Slot, TextFrame, TextRun
 
 AVERAGE_GLYPH_WIDTH = 0.5
 """Ширина знака в долях кегля. Для пропорциональных гарнитур — около половины."""
@@ -34,20 +40,75 @@ EMU_PER_INCH = 914400
 ELLIPSIS = "…"
 
 
-def text_fits(paragraphs: list[str], bounds: Bounds, canvas: Canvas, size_pt: float) -> bool:
+def text_fits(
+    paragraphs: list[str],
+    bounds: Bounds,
+    canvas: Canvas,
+    size_pt: float,
+    frame: TextFrame | None = None,
+) -> bool:
     """Помещается ли текст в прямоугольник при данном кегле.
 
     Вынесено из `fits` ради аудита: проверка `layout.text_overflow` обязана
     оценивать вместимость тем же расчётом, что и вёрстка. Две метрики
     разошлись бы, и аудит объявлял бы дефектом то, что вёрстка считает нормой.
+    `frame` — то, что отнимает у текста место; без него считается вся рамка.
     """
-    return _lines_needed(paragraphs, bounds, canvas, size_pt) <= _lines_available(bounds, canvas, size_pt)
+    return text_height(paragraphs, bounds, canvas, size_pt, frame) <= room_height(bounds, canvas, frame)
 
 
 def fits(paragraphs: list[str], slot: Slot, canvas: Canvas, size_pt: float | None = None) -> bool:
     """Помещается ли текст в слот при данном кегле."""
     size = size_pt or (slot.text_style.size_pt if slot.text_style else None) or 14.0
-    return text_fits(paragraphs, slot.bounds, canvas, size)
+    return text_fits(paragraphs, slot.bounds, canvas, size, slot.frame)
+
+
+def text_height(
+    paragraphs: list[str],
+    bounds: Bounds,
+    canvas: Canvas,
+    size_pt: float,
+    frame: TextFrame | None = None,
+) -> float:
+    """Сколько пунктов высоты займёт текст: строки и отбивки абзацев."""
+    frame = frame or TextFrame()
+    per_line = max(_chars_per_line(bounds, canvas, size_pt, frame), 1)
+    lines = sum(wrapped_lines(paragraph, per_line) for paragraph in paragraphs)
+    spacing = len(paragraphs) * (frame.space_before_pt + frame.space_after_pt)
+    return lines * _line_pitch(size_pt, frame) + spacing
+
+
+def room_height(bounds: Bounds, canvas: Canvas, frame: TextFrame | None = None) -> float:
+    """Сколько пунктов высоты есть у текста внутри рамки."""
+    frame = frame or TextFrame()
+    share = max(bounds.h - frame.inset_top - frame.inset_bottom, 0.0)
+    return share * canvas.height_emu / EMU_PER_INCH * POINTS_PER_INCH
+
+
+def wrapped_lines(paragraph: str, per_line: int) -> int:
+    """Число строк абзаца при переносе по словам.
+
+    Слово, не влезшее в остаток строки, начинает следующую, и остаток
+    пропадает. В широкой колонке это незаметно, в узкой — лишняя строка на
+    каждые две-три: «аналитика (140» и «пар)» на рендере T-58 — две строки
+    там, где деление числа знаков на ширину давало одну. Слово длиннее
+    строки рвётся, как его рвёт программа просмотра.
+    """
+    words = paragraph.split()
+    if not words:
+        return 1
+    lines, used = 1, 0
+    for word in words:
+        need = len(word) if used == 0 else used + 1 + len(word)
+        if need <= per_line:
+            used = need
+            continue
+        if used:
+            lines += 1
+        full, rest = divmod(len(word), per_line)
+        lines += full - 1 if rest == 0 else full
+        used = per_line if rest == 0 else rest
+    return lines
 
 
 def plan_compensations(
@@ -115,36 +176,45 @@ def plan_compensations(
 
 
 def _truncate(paragraphs: list[str], slot: Slot, canvas: Canvas, size: float) -> list[str]:
-    """Сократить текст до вмещающегося, сохранив начало каждого абзаца."""
-    available = _lines_available(slot.bounds, canvas, size)
-    per_line = max(_chars_per_line(slot.bounds, canvas, size), 1)
+    """Сократить текст до вмещающегося: целые абзацы, пока помещаются, затем
+    начало следующего с многоточием.
 
+    Вместимость проверяется той же метрикой `text_fits`, а не отдельным
+    подсчётом знаков: иначе сокращённый текст мог бы снова не поместиться.
+    """
     kept: list[str] = []
-    used = 0
     for paragraph in paragraphs:
-        if used >= available:
-            break
-        room = (available - used) * per_line
-        if len(paragraph) <= room:
+        if text_fits([*kept, paragraph], slot.bounds, canvas, size, slot.frame):
             kept.append(paragraph)
-            used += max(1, -(-len(paragraph) // per_line))
-        else:
-            cut = max(int(room) - len(ELLIPSIS), 1)
-            kept.append(paragraph[:cut].rstrip() + ELLIPSIS)
-            used = available
+            continue
+        cut = _longest_prefix(kept, paragraph, slot, canvas, size)
+        if cut:
+            kept.append(cut)
+        break
     return kept or [ELLIPSIS]
 
 
-def _chars_per_line(bounds: Bounds, canvas: Canvas, size: float) -> int:
-    width_pt = bounds.w * canvas.width_emu / EMU_PER_INCH * POINTS_PER_INCH
+def _longest_prefix(kept: list[str], paragraph: str, slot: Slot, canvas: Canvas, size: float) -> str | None:
+    """Самое длинное начало абзаца с многоточием, которое ещё помещается."""
+    low, high, best = 1, len(paragraph) - 1, None
+    while low <= high:
+        middle = (low + high) // 2
+        candidate = paragraph[:middle].rstrip() + ELLIPSIS
+        if text_fits([*kept, candidate], slot.bounds, canvas, size, slot.frame):
+            best, low = candidate, middle + 1
+        else:
+            high = middle - 1
+    return best
+
+
+def _chars_per_line(bounds: Bounds, canvas: Canvas, size: float, frame: TextFrame) -> int:
+    share = max(bounds.w - frame.inset_left - frame.inset_right - frame.indent, 0.0)
+    width_pt = share * canvas.width_emu / EMU_PER_INCH * POINTS_PER_INCH
     return int(width_pt / (size * AVERAGE_GLYPH_WIDTH))
 
 
-def _lines_available(bounds: Bounds, canvas: Canvas, size: float) -> int:
-    height_pt = bounds.h * canvas.height_emu / EMU_PER_INCH * POINTS_PER_INCH
-    return max(int(height_pt / (size * LINE_HEIGHT)), 0)
-
-
-def _lines_needed(paragraphs: list[str], bounds: Bounds, canvas: Canvas, size: float) -> int:
-    per_line = max(_chars_per_line(bounds, canvas, size), 1)
-    return sum(max(1, -(-len(paragraph) // per_line)) for paragraph in paragraphs)
+def _line_pitch(size: float, frame: TextFrame) -> float:
+    """Шаг строки: точный интервал шаблона либо его доля от одинарного."""
+    if frame.line_spacing_pt:
+        return frame.line_spacing_pt
+    return size * LINE_HEIGHT * frame.line_spacing

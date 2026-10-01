@@ -16,7 +16,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from dpd.models.common import Bounds, Canvas, Contract
+from dpd.models.common import Bounds, Canvas, Contract, TextFrame
 from dpd.models.tokens import DesignTokens
 
 SlotKind = Literal["title", "body", "other"]
@@ -134,6 +134,10 @@ class Slot(Contract):
     автоматически. Для слотов, выведенных из обычных фигур (T-13),
     плейсхолдера не существует, и экспорт создаёт текстовую рамку по
     координатам.
+
+    `frame` — поля рамки, отступ абзаца и интервалы, отнимающие у текста
+    место (T-60). Разбор заполняет его у каждого слота; `None` значит, что
+    схема собрана не разбором, и вместимость считается по всей рамке.
     """
 
     id: str
@@ -142,6 +146,7 @@ class Slot(Contract):
     bounds: Bounds
     placeholder_idx: int | None = None
     text_style: TextStyle | None = None
+    frame: TextFrame | None = None
 
 
 class FixedElement(Contract):
