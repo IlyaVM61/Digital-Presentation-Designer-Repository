@@ -25,6 +25,7 @@ from dpd.models import (
     TemplateSchema,
     TemplateSource,
 )
+from dpd.models.structure import TableSpec, Visualization
 
 
 def slot(slot_id: str, kind: str, y: float) -> Slot:
@@ -71,6 +72,19 @@ def test_title_slide_takes_a_title_layout() -> None:
 def test_content_slide_takes_a_content_layout() -> None:
     rendered = compose(structure("data"), template(TITLE_ONLY, CONTENT, SPLIT))
     assert rendered.slides[0].layout_id == "m/l2"
+
+
+@pytest.mark.parametrize("role", ["section", "closing"])
+def test_title_like_slide_with_a_table_moves_to_a_content_layout(role: str) -> None:
+    """Найдено рендером T-50: заставка с таблицей волн легла на макет раздела
+    без слота содержимого, и таблица пропала молча. Визуализация — такое же
+    содержимое, как тело."""
+    table = Visualization(kind="table", table=TableSpec(headers=["Волна", "Пар"], rows=[["Первая", "140"]]))
+    slide = StructureSlide(id="s1", role=role, headline="План", visualization=table)
+    rendered = compose(PresentationStructure(slides=[slide]), template(TITLE_ONLY, CONTENT))
+
+    assert rendered.slides[0].layout_id == "m/l2"
+    assert [element.kind for element in rendered.slides[0].elements] == ["text", "table"]
 
 
 def test_missing_family_degrades_to_the_nearest() -> None:

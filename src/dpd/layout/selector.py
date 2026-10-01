@@ -48,8 +48,10 @@ def requested_family(slide: StructureSlide) -> LayoutFamily:
     """Какой тип макета нужен слайду по его роли и содержимому."""
     family = ROLE_TO_FAMILY.get(slide.role, DEFAULT_FAMILY)
     # Роль может просить титульный макет, но если контент есть, класть его
-    # некуда: содержимое важнее номинального типа.
-    if family in ("title", "section") and slide.body and slide.body.items:
+    # некуда: содержимое важнее номинального типа. Визуализация — тоже
+    # содержимое: заставка с таблицей теряла её молча (найдено рендером T-50).
+    has_content = bool(slide.body and slide.body.items) or slide.visualization is not None
+    if family in ("title", "section") and has_content:
         return DEFAULT_FAMILY
     return family
 
