@@ -15,6 +15,17 @@
 (T-47). Числа сравниваются без оглядки на запись: «1 240» и «1240», «4,5» и
 «4.5» — одно число.
 
+**Колода не падает из-за одного слайда** (T-61, вопрос T23). Найдено
+приёмочным прогоном T-59: слайд, собирающий числа из нескольких разделов,
+модель за три попытки не доводила до проверки — с каждым повтором
+добавляла одну ссылку из нескольких нужных, — и `ModelError` одного слайда
+ронял всю колоду. Поэтому ссылку на раздел, где число встречается одно,
+ставит код: модель пишет, решает код (урок T-51 и T-52). Слайд, который за
+все попытки так и не прошёл проверку, собирается из последнего ответа: число,
+которого в фактуре нет, на слайд не попадает, а убранное называет проверка
+текста. Ответ, из которого слайд не собрать, — модель не ответила или
+ответила не по схеме — по-прежнему ошибка этапа (EF-8). ADR-0007.
+
 **Ключевое сообщение на слайд отдельным элементом не выводится.** Оно —
 тезис, который тело доказывает, и опора проверки «содержимое соответствует
 заголовку» (T-51). Слота под подзаголовок схема шаблона не знает, а на
@@ -32,14 +43,15 @@ from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import Field, create_model, model_validator
+from pydantic import Field, ValidationError, create_model, model_validator
 
 from dpd.generation.content_pack import CONTENT_FILE, ContentPack
 from dpd.generation.structure import DEFAULT_SLIDE_RANGE, generate_structure
-from dpd.llm import ModelClient, PromptSet
+from dpd.llm import ModelClient, ModelError, PromptSet
+from dpd.llm.client import extract_json
 from dpd.models import PresentationStructure, StructureSlide
 from dpd.models.common import Contract
-from dpd.models.structure import SlideBody, Visualization
+from dpd.models.structure import Omission, SlideBody, Visualization
 
 PROMPT = "skills/slide-content-generator"
 CONTENT_STAGE = "Содержание слайдов"
@@ -174,6 +186,8 @@ def content_contract(role: str, sections: dict[str, str]) -> type[SlideContent]:
     numbers = {anchor: fact_numbers(text) for anchor, text in sections.items()}
 
     def check(content: SlideContent) -> SlideContent:
+        if role not in DECK_ROLES:
+            content.source_refs = traced_refs(content, numbers)
         # Правила вне схемы: их держит не провайдер, а повтор клиента.
         problems = [
             *_shape_problems(content, role),
@@ -241,6 +255,24 @@ def _visual_problems(visual: Visualization) -> list[str]:
     ]
 
 
+def traced_refs(content: SlideContent, numbers: dict[str, set[str]]) -> list[str]:
+    """Ссылки слайда и разделы, где число слайда встречается одно (T-61).
+
+    Число, которое есть ровно в одном разделе фактуры, взято оттуда, и
+    повторять запрос ради ссылки незачем. Число из нескольких разделов код ни
+    к одному не относит: откуда оно взято, знает только модель. Плану колоды
+    (`DECK_ROLES`) ссылки не ставятся: его числа — части колоды, и совпадение
+    с фактурой у них случайно.
+    """
+    refs = list(content.source_refs)
+    for _, text in slide_texts(content):
+        for raw in NUMBER.findall(text):
+            holders = [anchor for anchor, found in numbers.items() if canonical(raw) in found]
+            if len(holders) == 1 and holders[0] not in refs:
+                refs.append(holders[0])
+    return refs
+
+
 def _untraced_numbers(content: SlideContent, numbers: dict[str, set[str]]) -> list[str]:
     """Числа слайда, которых нет в разделах, на которые он ссылается."""
     cited = set().union(*(numbers[anchor] for anchor in content.source_refs))
@@ -278,14 +310,20 @@ def slide_texts(content: SlideContent | StructureSlide) -> list[tuple[str, str]]
     if content.body:
         texts += [(f"body.items[{n}]", item) for n, item in enumerate(content.body.items)]
 
-    visual = content.visualization
-    if visual and visual.table:
+    if content.visualization:
+        texts += visual_texts(content.visualization)
+    return texts
+
+
+def visual_texts(visual: Visualization) -> list[tuple[str, str]]:
+    texts: list[tuple[str, str]] = []
+    if visual.table:
         table = visual.table
         texts += [(f"table.headers[{n}]", header) for n, header in enumerate(table.headers)]
         texts += [
             (f"table.rows[{r}][{c}]", cell) for r, row in enumerate(table.rows) for c, cell in enumerate(row)
         ]
-    if visual and visual.chart:
+    if visual.chart:
         chart = visual.chart
         texts += [(f"chart.categories[{n}]", category) for n, category in enumerate(chart.categories)]
         for s, series in enumerate(chart.series):
@@ -293,6 +331,81 @@ def slide_texts(content: SlideContent | StructureSlide) -> list[tuple[str, str]]
             texts += [(f"chart.series[{s}].points[{p}]", number_text(point)) for p, point in enumerate(series.points)]
         texts += [(f"chart.axisTitles.{axis}", title) for axis, title in chart.axis_titles if title]
     return texts
+
+
+# --- Слайд из неудачного ответа ---------------------------------------------------
+
+
+def salvage(answer: str, slide: StructureSlide, numbers: dict[str, set[str]]) -> StructureSlide | None:
+    """Слайд из последнего ответа, не прошедшего проверку (T-61, вопрос T23).
+
+    Число, которого в фактуре нет, на слайд не попадает: пункт с ним убран и
+    назван в `omitted`, визуализация с ним убрана целиком — диаграмма без
+    точки или таблица без ячейки врали бы сильнее, чем слайд без них, —
+    заголовок и ключевое сообщение остаются из структуры колоды. Число,
+    которое в фактуре есть, но в нескольких разделах и ни в одном из тех, на
+    что слайд ссылается, остаётся: то ли это число, решает человек по
+    предупреждению проверки текста (`content.unsourced_numbers`).
+
+    Форма слайда — та, что ждёт вёрстка: у титула нет тела, несобранная
+    визуализация не показывается, а из тела и визуализации остаётся
+    визуализация — так их и свёрстали бы. Слайд, на котором после этого не
+    осталось ничего, кроме заголовка, называет проверка пустого слайда.
+
+    Ответ, который не разбирается как ответ на слайд, сохранить нельзя — `None`.
+    """
+    try:
+        content = SlideContent.model_validate_json(extract_json(answer))
+    except ValidationError:
+        return None
+
+    content.source_refs = [anchor for anchor in content.source_refs if anchor in numbers]
+    if slide.role not in DECK_ROLES:
+        content.source_refs = traced_refs(content, numbers)
+    known = set().union(*numbers.values())
+
+    def invented(text: str) -> list[str]:
+        return list(dict.fromkeys(number for raw in NUMBER.findall(text) if (number := canonical(raw)) not in known))
+
+    omitted: list[Omission] = []
+    items: list[str] = []
+    for item in content.body.items if content.body else []:
+        if found := invented(item):
+            omitted.append(Omission(text=item, numbers=found))
+        else:
+            items.append(item)
+
+    visual = content.visualization
+    if visual and _visual_problems(visual):
+        visual = None
+    if visual and (found := invented(" ".join(text for _, text in visual_texts(visual)))):
+        omitted.append(Omission(text=_visual_label(visual), numbers=found))
+        visual = None
+
+    body = content.body.model_copy(update={"items": items}) if content.body and items else None
+    if slide.role in BODYLESS_ROLES:
+        body, visual = None, None
+    elif visual:
+        body = None
+
+    return StructureSlide(
+        id=slide.id,
+        role=slide.role,
+        headline=slide.headline if invented(content.headline) else content.headline,
+        key_message=slide.key_message if invented(content.key_message) else content.key_message,
+        body=body,
+        visualization=visual,
+        source_refs=content.source_refs,
+        omitted=omitted,
+    )
+
+
+def _visual_label(visual: Visualization) -> str:
+    """Как назвать убранную визуализацию человеку: по шапке или по рядам."""
+    if visual.table:
+        return f"таблица: {', '.join(visual.table.headers)}"
+    names = ", ".join(series.name for series in visual.chart.series) if visual.chart else ""
+    return f"диаграмма: {names}"
 
 
 # --- Генерация --------------------------------------------------------------------
@@ -308,12 +421,14 @@ def generate_content(
 ) -> PresentationStructure:
     """Тело или визуализация и ссылки на источник для каждого слайда структуры.
 
-    Невалидный после всех попыток ответ поднимает `ModelError` с этапом
-    `CONTENT_STAGE` — частичной колоды дальше по пайплайну не уходит (EF-8).
-    После первого такого сбоя слайды, до которых очередь не дошла, не
-    запрашиваются: их ответы всё равно были бы выброшены.
+    Ответ, не прошедший проверку за все попытки, не роняет колоду: слайд
+    собирается из него без выдуманных чисел (`salvage`, T-61). Ответ, из
+    которого слайд не собрать, поднимает `ModelError` с этапом
+    `CONTENT_STAGE` (EF-8). После такого сбоя слайды, до которых очередь не
+    дошла, не запрашиваются: их ответы всё равно были бы выброшены.
     """
     sections = fact_sections(pack.content)
+    numbers = {anchor: fact_numbers(text) for anchor, text in sections.items()}
     system = prompts.get(PROMPT).text
     facts = "\n\n".join(f"[{anchor}]\n{text}" for anchor, text in sections.items())
     deck = [
@@ -329,6 +444,12 @@ def generate_content(
         user = f"{pack.brief}\n\n{facts}\n\n{json.dumps({'deck': deck, 'slide': card}, ensure_ascii=False)}"
         try:
             content = client.complete(system, user, content_contract(slide.role, sections), stage=CONTENT_STAGE)
+        except ModelError as error:
+            salvaged = salvage(error.answer, slide, numbers) if error.answer is not None else None
+            if salvaged is None:
+                failed.set()
+                raise
+            return salvaged
         except BaseException:
             failed.set()
             raise

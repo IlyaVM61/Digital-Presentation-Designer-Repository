@@ -198,6 +198,10 @@ def check_unsourced_numbers(
 
     Записи числа сравниваются так же, как в контракте генерации (T-50):
     «1 240» и «1240», «2,8 млн» и 2800000 — одно число.
+
+    Убранное генерацией со слайда (`omitted`, T-61) — предупреждение: на
+    слайде выдуманного числа нет, но пункт или визуализация пропали, и
+    вписать ли их, проверив число, решает человек.
     """
     numbers = {anchor: fact_numbers(text) for anchor, text in fact_sections(content_pack.content).items()}
     numbers[BRIEF_FILE] = fact_numbers(content_pack.brief)
@@ -235,6 +239,19 @@ def check_unsourced_numbers(
                         )
                     )
 
+    dropped = [
+        UNSOURCED_NUMBERS.finding(
+            f"Со слайда убрано «{omission.text}»: "
+            f"{'числа' if len(omission.numbers) == 1 else 'чисел'} {', '.join(omission.numbers)} "
+            "нет в исходных материалах. Проверьте по материалам и при необходимости впишите сами.",
+            severity="warning",
+            slide_number=number,
+            evidence={"slideId": slide.id, "omitted": omission.text, "numbers": omission.numbers},
+        )
+        for number, slide in enumerate(structure.slides, start=1)
+        for omission in slide.omitted
+    ]
+
     if review is not None:
         # Строка, уже отмеченная сверкой чисел, второй раз не предъявляется:
         # остаётся воспроизводимая находка. Модель повторяла её как
@@ -251,7 +268,7 @@ def check_unsourced_numbers(
             for claim in answer.unsupported_claims
             if not any(at == number and plain(claim) in text for at, text in flagged)
         ]
-    return findings
+    return findings + dropped
 
 
 @check(SERVICE_GARBAGE)

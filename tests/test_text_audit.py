@@ -215,7 +215,7 @@ def test_text_dropped_by_the_writer_is_named() -> None:
     """T-61: слайд, который модель за все попытки так и не написала без
     выдуманных чисел, собирается без них. Молча терять пункт нельзя: человек
     узнаёт, что убрано и почему, и решает, вписать ли его сам."""
-    omitted = [Omission(text="Отток упал на 20%", numbers=["20"]), Omission(text="таблица «Квартал, Пар»", numbers=["35", "40"])]
+    omitted = [Omission(text="Отток упал на 20%", numbers=["20"]), Omission(text="таблица: Квартал, Пар", numbers=["35", "40"])]
     structure = deck(slide(1, body=bullets("Было 78%, стало 89%"), source_refs=[RESULTS], omitted=omitted))
 
     first, second = check_unsourced_numbers(structure, PACK)
