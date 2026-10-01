@@ -30,11 +30,17 @@ from typing import Literal
 
 from pydantic import Field, create_model, model_validator
 
-from dpd.audit.registry import REGISTRY, AuditContext, discover, run_checks
+from dpd.audit.registry import AuditContext, discover, run_checks
 from dpd.generation import ContentPack, fact_sections
 from dpd.generation.content import slide_texts
 from dpd.llm import ModelClient, PromptSet
-from dpd.models import AuditReport, Finding, PresentationStructure, RenderedPresentation, StructureSlide
+from dpd.models import (
+    AuditReport,
+    Finding,
+    PresentationStructure,
+    RenderedPresentation,
+    StructureSlide,
+)
 from dpd.models.common import Contract
 
 PROMPT = "skills/content-validator"

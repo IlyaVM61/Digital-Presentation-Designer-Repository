@@ -38,11 +38,23 @@ from dpd.audit.checks.content import (
     check_typos,
     check_unsourced_numbers,
 )
-from dpd.audit.textual import TEXT_STAGE, attach, audit_text, review_contract, review_text
+from dpd.audit.textual import (
+    TEXT_STAGE,
+    attach,
+    audit_text,
+    review_contract,
+    review_text,
+)
 from dpd.generation import ContentPack
 from dpd.llm import ModelClient, ModelError, ModelSettings, load_prompts
 from dpd.models import AuditReport, Finding, PresentationStructure, StructureSlide
-from dpd.models.structure import ChartSeries, ChartSpec, SlideBody, TableSpec, Visualization
+from dpd.models.structure import (
+    ChartSeries,
+    ChartSpec,
+    SlideBody,
+    TableSpec,
+    Visualization,
+)
 
 BRIEF = "# Бриф\n\nПросим решение о масштабировании пилота."
 CONTENT = """# Фактура
