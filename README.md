@@ -99,7 +99,6 @@ D:\venvs\dpd\Scripts\pytest
 | `DPD_OUTPUT_DIR` | Каталог результатов генерации и промежуточных артефактов | `D:\dpd-out` |
 | `DPD_AUDIT_CONFIG` | Файл с порогами проверок аудита | `configs/audit.yaml` |
 | `PIPELINE_TIMEOUT_SEC` | Лимит времени на колоду (ТЗ: не более 5 минут) | `300` |
-| `PROMPTS_VERSION` | Версия набора промптов для воспроизводимости | `v1` |
 | `LOG_LEVEL` | Уровень логирования | `INFO` |
 
 Модели, эндпоинты и параметры запросов по умолчанию — температура, seed, лимит токенов, число попыток, параметры провайдера — заданы в `configs/models.yaml`. Переменные `*_BASE_URL`, `*_MODEL` и `*_API_KEY` сильнее файла: окружение процесса сильнее `.env`, `.env` сильнее конфига.
@@ -138,7 +137,8 @@ assets/templates/calibration/  калибровочные шаблоны VK — 
 assets/templates/acceptance/   приёмочный шаблон для end-to-end демонстрации
 assets/templates/edge-cases/   входы, которые формально .pptx, но шаблонами не являются
 assets/content-pack/           контент-пакет (наш артефакт, один на все прогоны)
-prompts/skills/                промпты скиллов, версионируются отдельно от кода
+prompts/skills/                промпты скиллов, версионируются отдельно от кода;
+                               версия набора — prompts/CHANGELOG.md, формат — prompts/README.md
 prompts/agents/                промпты агентов
 docs/                          проектная документация по фазам
 scripts/                       служебные скрипты и requirements.txt
