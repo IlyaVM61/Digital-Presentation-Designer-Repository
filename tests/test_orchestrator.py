@@ -431,3 +431,46 @@ def test_every_report_names_the_prompt_set_and_revision_keeps_it(template: Path,
     revised = revise(result, variant, {index: "split"})
 
     assert revised.reports[variant].prompt_versions == expected
+
+
+# --- Аудит текста (T-51) -----------------------------------------------------
+
+
+def test_text_audit_reaches_every_variant_and_survives_revision(template: Path, out_dir: Path) -> None:
+    """Аудит текста выполняется один раз на колоду, до вёрстки, а его находки
+    видны в отчёте каждого варианта — и после исправления по выбору
+    пользователя тоже, на своём слайде, хотя номера сдвинулись."""
+    from dpd.audit.textual import audit_text
+    from dpd.models import Finding
+    from dpd.orchestrator import revise
+
+    structure = structure_from_outline(CROWDED + "Что дальше\n- Сборка по контент-пакету\n")
+    last = structure.slides[-1]
+    typo = Finding.model_validate(
+        {
+            "checkId": "content.typos",
+            "category": "content",
+            "class": "model",
+            "severity": "warning",
+            "fixability": "semantic",
+            "message": "Опечатка",
+            "slideNumber": len(structure.slides),
+            "evidence": {"slideId": last.id},
+        }
+    )
+    text = audit_text(structure)
+    text = text.model_copy(update={"findings": [typo], "checks_run": [*text.checks_run, "content.typos"]})
+
+    result = run_pipeline(template, structure, out_dir / "text-audit", formats=("html",), text_audit=text)
+
+    for report in result.reports.values():
+        assert "content.typos" in [f.check_id for f in report.findings]
+        assert "content.headline_no_conclusion" in report.checks_skipped
+    variant = result.variants[0].variant
+    report = result.reports[variant]
+    index = next(i for i, f in enumerate(report.findings) if f.check_id == "density.too_many_bullets")
+
+    revised = revise(result, variant, {index: "split"})
+
+    [moved] = [f for f in revised.reports[variant].findings if f.check_id == "content.typos"]
+    assert moved.slide_number == len(structure.slides) + 1

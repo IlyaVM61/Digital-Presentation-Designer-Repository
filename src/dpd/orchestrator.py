@@ -36,6 +36,11 @@ LibreOffice: 16,6 с против 8,8 с на одну и около 26 с тр�
 каждого варианта: какими промптами получен результат, иначе не узнать (ТЗ,
 п. 2.4). Битый файл промпта останавливает прогон до разбора шаблона, а не
 посреди генерации.
+
+**Аудит текста приходит готовым** (T-51). Он выполняется один раз на колоду
+до вёрстки — там же, где генерация, — а прогон дописывает его находки в отчёт
+каждого варианта: пользователь смотрит на вариант, и замечания к тексту
+должны быть там же, где замечания к вёрстке.
 """
 
 from __future__ import annotations
@@ -52,6 +57,7 @@ from dpd.audit import AuditContext, discover
 from dpd.audit.checks import check_variant_distinction
 from dpd.audit.fixer import repair
 from dpd.audit.remedies import Choice, Remedy, apply_remedies, options
+from dpd.audit.textual import attach
 from dpd.export import export_html, export_pdf, export_pptx
 from dpd.layout import compose_variants
 from dpd.layout.variants import load_profiles
@@ -142,6 +148,8 @@ class RunResult:
     formats: tuple[str, ...] = ()
     """Входы прогона: без них `revise` нечем перевыгрузить исправленный
     вариант."""
+    text_audit: AuditReport | None = None
+    """Аудит текста колоды (T-51): `revise` дописывает его в свежий отчёт."""
 
 
 def run_pipeline(
@@ -153,12 +161,16 @@ def run_pipeline(
     variant: str | None = None,
     previews: bool = False,
     progress: Progress | None = None,
+    text_audit: AuditReport | None = None,
 ) -> RunResult:
     """Пройти путь от файла шаблона до выгруженной колоды.
 
     `variant` выбирает, какой из трёх вариантов считать выбранным; по
     умолчанию первый. Аудит и выгрузка при этом выполняются для всех трёх:
     пользователь сравнивает их рядом и выбирает после прогона.
+
+    `text_audit` — отчёт аудита текста этой же структуры (`audit_text`), его
+    находки входят в отчёт каждого варианта.
     """
     template_path, out_dir = Path(template_path), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -191,8 +203,10 @@ def run_pipeline(
             context = AuditContext(deck=deck, template=schema, structure=structure)
             result = repair(context)
             variants[index] = result.deck
-            reports[deck.variant] = result.report
-            remedies[deck.variant] = options(replace(context, deck=result.deck), result.report)
+            # Находки текста дописываются до подбора способов исправления:
+            # способы адресуются номером находки в отчёте.
+            reports[deck.variant] = attach(result.report, text_audit, result.deck)
+            remedies[deck.variant] = options(replace(context, deck=result.deck), reports[deck.variant])
         # Различимость меряется после починки: сравниваются колоды, которые
         # пользователь увидит, а не черновики.
         distinction = check_variant_distinction(variants, schema)
@@ -236,6 +250,7 @@ def run_pipeline(
         structure=structure,
         out_dir=out_dir,
         formats=tuple(formats),
+        text_audit=text_audit,
     )
 
 
@@ -274,6 +289,7 @@ def revise(result: RunResult, variant: str, choices: Mapping[int, str]) -> RunRe
             "prompt_versions": report.prompt_versions,
         }
     )
+    fresh = attach(fresh, result.text_audit, repaired.deck)
 
     variants = [repaired.deck if item.variant == variant else item for item in result.variants]
     exports, images = _export(

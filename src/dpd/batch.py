@@ -20,6 +20,12 @@
 `--outline` для прогона без модели: детерминированный контур работает
 офлайн (NFR-7), но колодами сдачи такой прогон не считается.
 
+**Текст колоды проверяется один раз, до вёрстки** (T-51): девять колод
+собраны из одной структуры, и смысловые замечания к ней одинаковы для всех.
+Отчёт аудита текста входит в отчёт каждой колоды. Сбой модели на этой
+проверке колоды не останавливает: смысловые проверки названы в отчётах
+пропущенными, а детерминированные выполнены.
+
 **Сбой одного шаблона не останавливает остальные.** Он виден по коду
 возврата и по сводке, но колоды соседних шаблонов собираются: девять колод
 не должны зависеть от самого слабого файла.
@@ -38,7 +44,9 @@ from pathlib import Path
 
 import yaml
 
+from dpd.audit.textual import audit_text
 from dpd.generation import (
+    ContentPack,
     generate_presentation,
     load_content_pack,
     structure_from_outline,
@@ -52,7 +60,7 @@ from dpd.llm import (
     load_prompts,
     load_settings,
 )
-from dpd.models import Finding, PresentationStructure
+from dpd.models import AuditReport, Finding, PresentationStructure
 from dpd.orchestrator import run_pipeline
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -87,15 +95,38 @@ def model_client(prompts: PromptSet) -> ModelClient:
     return build_client(load_settings("llm"), prompts)
 
 
-def generate_from_pack(directory: Path) -> PresentationStructure:
-    """Колода по контент-пакету: структура и содержание слайдов от модели."""
+def generate_from_pack(directory: Path) -> tuple[PresentationStructure, AuditReport]:
+    """Колода по контент-пакету: структура и содержание слайдов от модели,
+    затем аудит её текста тем же клиентом."""
     pack = load_content_pack(directory)
     prompts = load_prompts()
+    client = model_client(prompts)
     started = time.perf_counter()
     print(f"Генерирую колоду по контент-пакету {directory}…", flush=True)
-    structure = generate_presentation(pack, model_client(prompts), prompts)
+    structure = generate_presentation(pack, client, prompts)
     print(f"Колода из {len(structure.slides)} слайдов готова за {time.perf_counter() - started:.1f} с", flush=True)
-    return structure
+    return structure, check_text(structure, pack, client, prompts)
+
+
+def check_text(
+    structure: PresentationStructure,
+    pack: ContentPack | None = None,
+    client: ModelClient | None = None,
+    prompts: PromptSet | None = None,
+) -> AuditReport:
+    """Аудит текста колоды, один раз до вёрстки (T-51)."""
+    started = time.perf_counter()
+    try:
+        report = audit_text(structure, pack, client, prompts)
+    except ModelError as error:
+        print(f"Смысловая проверка текста не выполнена, в отчётах она названа пропущенной: {error}", flush=True)
+        report = audit_text(structure, pack)
+    print(
+        f"Текст проверен за {time.perf_counter() - started:.1f} с: замечаний {len(report.findings)}, "
+        f"пропущено проверок {len(report.checks_skipped)}",
+        flush=True,
+    )
+    return report
 
 
 def deck_name(slug: str, variant: str) -> str:
@@ -109,6 +140,7 @@ def build_decks(
     out_root: Path,
     *,
     formats: Sequence[str] = FORMATS,
+    text_audit: AuditReport | None = None,
 ) -> list[Built]:
     """Собрать все варианты каждого шаблона и разложить их по схеме сдачи."""
     decks_dir, audit_dir = out_root / "decks", out_root / "audit"
@@ -124,7 +156,7 @@ def build_decks(
         # диска не копирует файлы, а системный диск не тратится.
         with tempfile.TemporaryDirectory(dir=out_root, prefix=".work-", ignore_cleanup_errors=True) as work:
             try:
-                result = run_pipeline(template, structure, work, formats=formats)
+                result = run_pipeline(template, structure, work, formats=formats, text_audit=text_audit)
             except Exception as error:  # noqa: BLE001 — сбой шаблона идёт в сводку, а не роняет батч
                 built.error = f"{type(error).__name__}: {error}"
             else:
@@ -202,15 +234,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.outline is not None:
         structure = structure_from_outline(args.outline.read_text(encoding="utf-8"))
+        text = check_text(structure)
     else:
         try:
-            structure = generate_from_pack(args.content_pack)
+            structure, text = generate_from_pack(args.content_pack)
         except ModelError as error:
             print(f"Колода не сгенерирована: {error}", flush=True)
             return 1
 
     started = time.perf_counter()
-    results = build_decks(matrix, structure, args.out, formats=args.formats)
+    results = build_decks(matrix, structure, args.out, formats=args.formats, text_audit=text)
     failed = [built.slug for built in results if built.error]
     total = sum(len(built.decks) for built in results)
     print(f"Итого: {total} колод за {time.perf_counter() - started:.1f} с → {args.out}", flush=True)

@@ -121,6 +121,10 @@ def test_every_deck_has_its_audit_report(built: tuple[int, Path]) -> None:
         # файла и внутри отчёта совпадает.
         assert path.name.split("__")[1][0] == report["variant"].lower()
         assert report["timings"], path.name
+        # План, написанный человеком, модель не смотрела: смысловые проверки
+        # текста названы пропущенными, а не выданы за чистый текст (T-51).
+        assert "content.headline_no_conclusion" in report["checksSkipped"], path.name
+        assert "content.mixed_language" in report["checksRun"], path.name
 
 
 def test_nothing_but_the_scheme_is_left_behind(built: tuple[int, Path]) -> None:
@@ -237,7 +241,18 @@ def fake_model(request: httpx.Request) -> httpx.Response:
     числа, а ссылка ведёт на настоящий раздел `assets/content-pack/content.md`.
     """
     body = json.loads(request.content)
-    if body["response_format"]["json_schema"]["name"] == "DeckOutline":
+    if body["response_format"]["json_schema"]["name"] == "TextReview":
+        job = json.loads(body["messages"][1]["content"].rsplit("\n\n", 1)[1])
+        ok = {"ok": True, "reason": ""}
+        verdicts = ("headlineIsConclusion", "bodySupportsHeadline", "oneSentence", "followsPrevious")
+        lists = ("unsupportedClaims", "serviceText", "typos", "offPointItems")
+        content = {
+            "slides": [
+                {"id": item["id"], **dict.fromkeys(verdicts, ok), **{name: [] for name in lists}}
+                for item in job["slides"]
+            ]
+        }
+    elif body["response_format"]["json_schema"]["name"] == "DeckOutline":
         roles = ["title", "agenda", *["data"] * 7, "closing"]
         content = {
             "meta": {"purpose": "initiative", "audience": "руководители", "language": "ru"},
@@ -282,3 +297,7 @@ def test_decks_are_built_from_the_content_pack_without_a_human_outline(monkeypat
     assert calls == [1]
     deck = (out / "decks" / "vk-tech__a.html").read_text(encoding="utf-8")
     assert GENERATED_BODY in deck
+    # Аудит текста выполнен один раз до вёрстки и вошёл в отчёт колоды (T-51).
+    report = json.loads((out / "audit" / "vk-tech__a.report.json").read_text(encoding="utf-8"))
+    assert "content.headline_no_conclusion" in report["checksRun"]
+    assert not [item for item in report["checksSkipped"] if item.startswith("content.")]
