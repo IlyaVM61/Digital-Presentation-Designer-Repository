@@ -20,13 +20,19 @@ ElementKind = Literal["text", "table", "chart"]
 
 
 class RenderedTable(Contract):
-    """Таблица с оформлением, синтезированным из токенов шаблона."""
+    """Таблица с оформлением, синтезированным из токенов шаблона.
+
+    Пару «текст — то, что под ним» вёрстка задаёт целиком (T-56): заливка
+    шапки — `header_fill`, у строк заливки нет, и под ними фон слайда.
+    `header_fill` пуст, когда шапка тоже без заливки.
+    """
 
     headers: list[str] = Field(default_factory=list)
     rows: list[list[str]] = Field(default_factory=list)
     font: str | None = None
     size_pt: float | None = None
     header_color: str | None = None
+    header_fill: str | None = None
     body_color: str | None = None
 
 
@@ -45,6 +51,9 @@ class RenderedChart(Contract):
     has_legend: bool = False
     font: str | None = None
     size_pt: float | None = None
+    text_color: str | None = None
+    """Цвет названия, подписей осей, категорий и легенды. Фона у диаграммы
+    нет, и подписи лежат прямо на фоне слайда (T-56)."""
 
 
 class RenderedElement(Contract):
