@@ -21,9 +21,12 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 
+import httpx
 import pytest
 
+from dpd import batch
 from dpd.batch import deck_name, load_matrix, main
+from dpd.llm import ModelClient, ModelSettings, PromptSet, build_client
 from dpd.render import soffice_path
 
 OUTLINE = """Итоги пилота
@@ -35,6 +38,20 @@ OUTLINE = """Итоги пилота
 - Вёрстка
 - Аудит
 """
+
+PACK = Path(__file__).resolve().parents[1] / "assets" / "content-pack"
+SETTINGS = ModelSettings(
+    base_url="https://provider.test/v1",
+    api_key="test-key",
+    model="test/model",
+    temperature=0.0,
+    seed=42,
+    max_tokens=500,
+    timeout_sec=5.0,
+    max_attempts=3,
+    retry_delay_sec=0.0,
+    extra={},
+)
 
 SLUGS = ("vk-tech", "vk-workspace", "vk-education")
 NINE = [f"{slug}__{variant}" for slug in SLUGS for variant in "abc"]
@@ -191,6 +208,77 @@ def test_unknown_format_is_refused(outline: Path, tmp_path: Path) -> None:
         main(["--outline", str(outline), "--out", str(tmp_path), "--formats", "pptx,docx"])
 
 
-def test_outline_is_required(tmp_path: Path) -> None:
+def test_outline_and_content_pack_together_are_refused(outline: Path, tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
-        main(["--out", str(tmp_path)])
+        main(["--outline", str(outline), "--content-pack", str(PACK), "--out", str(tmp_path)])
+
+
+def test_content_pack_without_its_files_is_refused_before_any_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_requests(prompts: object) -> ModelClient:
+        raise AssertionError("запрос к модели до проверки входа")
+
+    monkeypatch.setattr(batch, "model_client", no_requests)
+    with pytest.raises(SystemExit):
+        main(["--content-pack", str(tmp_path), "--out", str(tmp_path / "out")])
+
+
+# --- Колоды из контент-пакета (T-50) -----------------------------------------
+
+
+GENERATED_BODY = "Наставник рядом с первого дня работы"
+
+
+def fake_model(request: httpx.Request) -> httpx.Response:
+    """Модель-подделка: структура колоды и содержание каждого слайда.
+
+    Ответы проходят проверку чисел на настоящей фактуре: в них нет ни одного
+    числа, а ссылка ведёт на настоящий раздел `assets/content-pack/content.md`.
+    """
+    body = json.loads(request.content)
+    if body["response_format"]["json_schema"]["name"] == "DeckOutline":
+        roles = ["title", "agenda", *["data"] * 7, "closing"]
+        content = {
+            "meta": {"purpose": "initiative", "audience": "руководители", "language": "ru"},
+            "slides": [{"role": role, "headline": "Тема", "keyMessage": "Мысль"} for role in roles],
+        }
+    else:
+        job = json.loads(body["messages"][1]["content"].rsplit("\n\n", 1)[1])
+        title = job["slide"]["role"] == "title"
+        content = {
+            "headline": "Наставничество окупилось" if not title else "Программа «Навигатор»",
+            "keyMessage": "Пилот готов к масштабированию",
+            "body": None if title else {"kind": "bullets", "items": [GENERATED_BODY]},
+            "visualization": None,
+            "sourceRefs": [] if title else ["content.md#суть-программы"],
+        }
+    message = {"role": "assistant", "content": json.dumps(content, ensure_ascii=False)}
+    return httpx.Response(200, json={"choices": [{"message": message, "finish_reason": "stop"}]})
+
+
+def test_decks_are_built_from_the_content_pack_without_a_human_outline(monkeypatch: pytest.MonkeyPatch) -> None:
+    matrix = dict(load_matrix())
+    if not matrix["vk-tech"].exists():
+        pytest.skip("нет калибровочного шаблона VK Tech")
+    config = _base() / "one.yaml"
+    config.write_text(
+        f"version: 1\ntemplates:\n  - slug: vk-tech\n    file: {matrix['vk-tech'].as_posix()}\n",
+        encoding="utf-8",
+    )
+    calls: list[int] = []
+
+    def mocked(prompts: PromptSet) -> ModelClient:
+        calls.append(1)
+        return build_client(SETTINGS, prompts, transport=httpx.MockTransport(fake_model))
+
+    monkeypatch.setattr(batch, "model_client", mocked)
+    out = _fresh("pack")
+
+    # Контент-пакет — вход по умолчанию: плана, написанного человеком, нет.
+    code = main(["--out", str(out), "--matrix", str(config), "--formats", "html"])
+
+    assert code == 0
+    assert calls == [1]
+    deck = (out / "decks" / "vk-tech__a.html").read_text(encoding="utf-8")
+    assert GENERATED_BODY in deck

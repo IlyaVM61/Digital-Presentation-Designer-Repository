@@ -1,6 +1,6 @@
 """Девять колод промежуточной сдачи одной командой (T-42).
 
-    D:\\venvs\\dpd\\Scripts\\python -m dpd.batch --outline ПЛАН.txt
+    D:\\venvs\\dpd\\Scripts\\python -m dpd.batch
 
 Матрица — три шаблона из `configs/decks.yaml` на три варианта вёрстки, на
 одном контенте (`docs/08-backlog/deliverables.md`). Результат раскладывается
@@ -12,10 +12,13 @@
 видит пользователь. Оркестратор называет файлы по имени шаблона; батч
 переносит их под имена схемы, а рабочий каталог прогона удаляет.
 
-**Содержание — план колоды, написанный человеком**, в том же формате, что на
-странице. Готовой структуры в контент-пакете быть не должно: её строит
-генерация по брифу (T-49), и когда она появится, батч получит её вход.
-Подменять её правдоподобной заглушкой нельзя.
+**Содержание генерирует модель по контент-пакету** (`assets/content-pack/`
+по умолчанию): структура колоды по брифу (T-49), затем содержание слайдов
+со ссылками на источник (T-50). Колода генерируется один раз, и все девять
+собираются из неё — «на одном контенте» по ТЗ. Готовой структуры в пакете
+нет, её строит генерация. План, написанный человеком, остаётся входом
+`--outline` для прогона без модели: детерминированный контур работает
+офлайн (NFR-7), но колодами сдачи такой прогон не считается.
 
 **Сбой одного шаблона не останавливает остальные.** Он виден по коду
 возврата и по сводке, но колоды соседних шаблонов собираются: девять колод
@@ -35,12 +38,15 @@ from pathlib import Path
 
 import yaml
 
-from dpd.generation import structure_from_outline
+from dpd.generation import generate_presentation, load_content_pack, structure_from_outline
+from dpd.generation.content_pack import BRIEF_FILE, CONTENT_FILE
+from dpd.llm import ModelClient, ModelError, PromptSet, build_client, load_prompts, load_settings
 from dpd.models import Finding, PresentationStructure
 from dpd.orchestrator import run_pipeline
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MATRIX = ROOT / "configs" / "decks.yaml"
+DEFAULT_PACK = ROOT / "assets" / "content-pack"
 
 FORMATS: tuple[str, ...] = ("pptx", "pdf", "html")
 """Все три обязательны по ТЗ; меньший набор нужен только для отладки."""
@@ -63,6 +69,22 @@ def load_matrix(path: str | Path = DEFAULT_MATRIX) -> list[tuple[str, Path]]:
     config = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     base = ROOT / config.get("templates_dir", ".")
     return [(entry["slug"], base / entry["file"]) for entry in config["templates"]]
+
+
+def model_client(prompts: PromptSet) -> ModelClient:
+    """Клиент LLM по `configs/models.yaml` и `.env`."""
+    return build_client(load_settings("llm"), prompts)
+
+
+def generate_from_pack(directory: Path) -> PresentationStructure:
+    """Колода по контент-пакету: структура и содержание слайдов от модели."""
+    pack = load_content_pack(directory)
+    prompts = load_prompts()
+    started = time.perf_counter()
+    print(f"Генерирую колоду по контент-пакету {directory}…", flush=True)
+    structure = generate_presentation(pack, model_client(prompts), prompts)
+    print(f"Колода из {len(structure.slides)} слайдов готова за {time.perf_counter() - started:.1f} с", flush=True)
+    return structure
 
 
 def deck_name(slug: str, variant: str) -> str:
@@ -131,7 +153,14 @@ def _formats(value: str) -> tuple[str, ...]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m dpd.batch", description="Девять колод промежуточной сдачи.")
-    parser.add_argument("--outline", type=Path, required=True, help="план колоды: заголовки и пункты со знаком «-»")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
+        "--content-pack",
+        type=Path,
+        default=DEFAULT_PACK,
+        help="каталог с brief.md и content.md; по умолчанию assets/content-pack",
+    )
+    source.add_argument("--outline", type=Path, help="план колоды без модели: заголовки и пункты со знаком «-»")
     parser.add_argument(
         "--out",
         type=Path,
@@ -148,13 +177,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not sys.stdout.isatty():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-    if not args.outline.is_file():
+    # Вход проверяется до запроса к модели: генерация стоит денег и десятков секунд.
+    if args.outline is not None and not args.outline.is_file():
         parser.error(f"план колоды не найден: {args.outline}")
-    structure = structure_from_outline(args.outline.read_text(encoding="utf-8"))
+    if args.outline is None:
+        absent = [name for name in (BRIEF_FILE, CONTENT_FILE) if not (args.content_pack / name).is_file()]
+        if absent:
+            parser.error(f"в контент-пакете {args.content_pack} нет {', '.join(absent)}")
     matrix = load_matrix(args.matrix)
     missing = [str(template) for _, template in matrix if not template.is_file()]
     if missing:
         parser.error("нет файлов шаблонов: " + "; ".join(missing))
+
+    if args.outline is not None:
+        structure = structure_from_outline(args.outline.read_text(encoding="utf-8"))
+    else:
+        try:
+            structure = generate_from_pack(args.content_pack)
+        except ModelError as error:
+            print(f"Колода не сгенерирована: {error}", flush=True)
+            return 1
 
     started = time.perf_counter()
     results = build_decks(matrix, structure, args.out, formats=args.formats)
