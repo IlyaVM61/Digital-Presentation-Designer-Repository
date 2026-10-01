@@ -38,9 +38,20 @@ from pathlib import Path
 
 import yaml
 
-from dpd.generation import generate_presentation, load_content_pack, structure_from_outline
+from dpd.generation import (
+    generate_presentation,
+    load_content_pack,
+    structure_from_outline,
+)
 from dpd.generation.content_pack import BRIEF_FILE, CONTENT_FILE
-from dpd.llm import ModelClient, ModelError, PromptSet, build_client, load_prompts, load_settings
+from dpd.llm import (
+    ModelClient,
+    ModelError,
+    PromptSet,
+    build_client,
+    load_prompts,
+    load_settings,
+)
 from dpd.models import Finding, PresentationStructure
 from dpd.orchestrator import run_pipeline
 
