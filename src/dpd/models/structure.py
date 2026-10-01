@@ -111,6 +111,14 @@ class Visualization(Contract):
     chart: ChartSpec | None = None
 
 
+class Omission(Contract):
+    """Что генерация убрала со слайда: пункт тела или визуализация целиком,
+    и числа в них, которых нет в фактуре (T-61)."""
+
+    text: str
+    numbers: list[str]
+
+
 class StructureSlide(Contract):
     """Слайд как замысел: что сказать и в какой роли.
 
@@ -120,6 +128,10 @@ class StructureSlide(Contract):
     (T-50) требует их в контракте ответа и сверяет с ними каждое число; здесь
     поле необязательно, потому что у плана, написанного человеком (T-38),
     источника нет.
+
+    `omitted` — что генерация убрала со слайда, когда модель за все попытки
+    так и не написала его без выдуманных чисел (T-61). Убранное называет
+    проверка текста: молча терять содержание нельзя.
     """
 
     id: str
@@ -129,6 +141,7 @@ class StructureSlide(Contract):
     body: SlideBody | None = None
     visualization: Visualization | None = None
     source_refs: list[str] = Field(default_factory=list)
+    omitted: list[Omission] = Field(default_factory=list)
 
 
 class PresentationStructure(Contract):

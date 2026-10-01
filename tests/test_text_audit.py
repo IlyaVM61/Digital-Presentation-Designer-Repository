@@ -51,6 +51,7 @@ from dpd.models import AuditReport, Finding, PresentationStructure, StructureSli
 from dpd.models.structure import (
     ChartSeries,
     ChartSpec,
+    Omission,
     SlideBody,
     TableSpec,
     Visualization,
@@ -208,6 +209,21 @@ def test_chart_points_and_table_cells_are_traced() -> None:
     [finding] = check_unsourced_numbers(structure, PACK)
 
     assert finding.evidence["number"] == "62"
+
+
+def test_text_dropped_by_the_writer_is_named() -> None:
+    """T-61: слайд, который модель за все попытки так и не написала без
+    выдуманных чисел, собирается без них. Молча терять пункт нельзя: человек
+    узнаёт, что убрано и почему, и решает, вписать ли его сам."""
+    omitted = [Omission(text="Отток упал на 20%", numbers=["20"]), Omission(text="таблица «Квартал, Пар»", numbers=["35", "40"])]
+    structure = deck(slide(1, body=bullets("Было 78%, стало 89%"), source_refs=[RESULTS], omitted=omitted))
+
+    first, second = check_unsourced_numbers(structure, PACK)
+
+    assert (first.severity, first.check_class, first.slide_number) == ("warning", "file", 1)
+    assert "Отток упал на 20%" in first.message and "числа 20 нет" in first.message
+    assert "чисел 35, 40 нет" in second.message
+    assert first.evidence == {"slideId": "s1", "omitted": "Отток упал на 20%", "numbers": ["20"]}
 
 
 def test_key_message_is_not_on_the_slide_and_is_not_checked() -> None:

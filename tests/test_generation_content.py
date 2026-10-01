@@ -9,6 +9,11 @@
 которого нет в разделах, на которые слайд ссылается, не проходит проверку
 контракта, и клиент T-47 повторяет запрос с перечнем ошибок.
 
+**Колода не падает из-за одного слайда (T-61, вопрос T23).** Ссылку на
+раздел, где число встречается одно, ставит код. Слайд, который за все
+попытки так и не прошёл проверку, собирается из последнего ответа без
+чисел, которых нет в фактуре, и называет убранное.
+
 Провайдер подменён `httpx.MockTransport`: тест проверяет код, а не модель.
 """
 
@@ -41,7 +46,7 @@ CONTENT = """# Фактура
 
 ## Результаты пилота
 
-Удержание в первый год выросло с 78% до 89%, на 11 п. п.
+Удержание в первый год выросло с 78% до 89%, на 11 п. п. Пилот шёл весь 2026 год.
 
 ## Масштаб пилота
 
@@ -54,6 +59,8 @@ CONTENT = """# Фактура
 """
 RESULTS = "content.md#результаты-пилота"
 SCALE = "content.md#масштаб-пилота"
+FRAME = "content.md#фактура"
+"""Раздел без чисел: ссылка на него не прослеживает ни одного числа."""
 
 
 def settings() -> ModelSettings:
@@ -131,10 +138,11 @@ class Provider:
     """Поддельный провайдер: ответы по номеру слайда, по очереди.
 
     Слайды пишутся параллельно, поэтому очередь одна на слайд, а не общая:
-    какой запрос придёт первым, решают потоки.
+    какой запрос придёт первым, решают потоки. Число в очереди — код ответа
+    провайдера без текста: сбой на его стороне.
     """
 
-    def __init__(self, answers: dict[int, list[str]]) -> None:
+    def __init__(self, answers: dict[int, list[str | int]]) -> None:
         self.answers = {number: list(queue) for number, queue in answers.items()}
         self.requests: list[dict] = []
         self.lock = threading.Lock()
@@ -145,6 +153,8 @@ class Provider:
         with self.lock:
             self.requests.append(body)
             content = self.answers[number].pop(0)
+        if isinstance(content, int):
+            return httpx.Response(content, text="сбой провайдера")
         message = {"role": "assistant", "content": content}
         return httpx.Response(200, json={"choices": [{"message": message, "finish_reason": "stop"}]})
 
@@ -296,12 +306,11 @@ def test_source_refs_are_limited_to_the_anchors_by_the_schema() -> None:
     ("wrong", "reason"),
     [
         pytest.param(answer(body=["Удержание выросло на 20%"], refs=[RESULTS]), "20", id="число-не-из-фактуры"),
-        pytest.param(answer(body=["Удержание 89%"], refs=[SCALE]), RESULTS, id="ссылка-не-на-тот-раздел"),
-        pytest.param(answer(headline="Пар стало 61", body=["Пункт"], refs=[RESULTS]), SCALE, id="число-в-заголовке"),
+        pytest.param(answer(body=["Пилот шёл в 2026 году"], refs=[FRAME]), RESULTS, id="число-в-нескольких-разделах"),
+        pytest.param(answer(headline="Итоги 2026 года", body=["Пункт"], refs=[FRAME]), SCALE, id="число-в-заголовке"),
         pytest.param(answer(key_message="Каждый пятый — 20%", body=["Пункт"], refs=[RESULTS]), "20", id="число-в-ключевом-сообщении"),
         pytest.param(answer(visualization=chart([34, 100]), refs=[SCALE]), "100", id="точка-диаграммы-выдумана"),
         pytest.param(answer(visualization=table([["I кв. 2026", "35"]]), refs=[SCALE]), "35", id="ячейка-таблицы-выдумана"),
-        pytest.param(answer(body=["Через программу прошли 1240 человек"], refs=[RESULTS]), SCALE, id="тысячи-без-пробела"),
         pytest.param(answer(body=["Пункт без чисел"]), "sourceRefs", id="тело-без-ссылок"),
         pytest.param(answer(body=["Пункт"], refs=["content.md#нет-такого"]), "sourceRefs", id="ссылка-вне-якорей"),
         pytest.param(answer(), "тело", id="пустой-слайд"),
@@ -325,13 +334,17 @@ def test_wrong_content_is_repaired_by_a_second_request(wrong: str, reason: str) 
 def test_number_from_another_section_may_be_cited_or_dropped() -> None:
     """Найдено живым прогоном: у слайда плана «5 частей» совпало с числом
     раздела «Контекст». Подсказка «сошлись на раздел» была бессмысленной для
-    плана, и модель дважды ушла в рассуждение до лимита в 8000 токенов."""
-    wrong = answer(body=["Колода из 61 части"], refs=[RESULTS])
-    provider = regular(s2=[wrong, content_answer()])
-    generate(provider)
+    плана, и модель дважды ушла в рассуждение до лимита в 8000 токенов.
+
+    Ссылку за план код не ставит (T-61): он сделан из состава колоды, и
+    совпадение числа с фактурой у него случайно."""
+    wrong = answer(body=["Колода из 61 части"])
+    provider = regular(s2=[wrong, answer(body=["Результаты пилота"])])
+    result = generate(provider, structure("title", "agenda", "closing"))
 
     repair = provider.for_slide(2)[1]["messages"][3]["content"]
     assert SCALE in repair and "без числа" in repair
+    assert result.slides[1].source_refs == []
 
 
 def test_title_slide_with_a_body_is_repaired() -> None:
@@ -420,15 +433,114 @@ def test_number_found_in_a_cited_section_passes_whatever_its_spelling() -> None:
     assert result.slides[1].source_refs == [SCALE]
 
 
-def test_content_that_stays_wrong_stops_with_the_stage_named_and_spends_no_more() -> None:
-    wrong = answer(body=["Удержание выросло на 20%"], refs=[RESULTS])
-    provider = regular(s1=[wrong] * 3)
+# --- Колода не падает из-за одного слайда (T-61) ----------------------------------
+
+
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [
+        pytest.param(answer(body=["Удержание 89%"], refs=[FRAME]), [FRAME, RESULTS], id="тело"),
+        pytest.param(answer(body=["Удержание 89%"]), [RESULTS], id="ссылок-не-было"),
+        pytest.param(answer(headline="Пар стало 61", body=["Пункт"], refs=[RESULTS]), [RESULTS, SCALE], id="заголовок"),
+        pytest.param(answer(body=["Через программу прошли 1240 человек"], refs=[RESULTS]), [RESULTS, SCALE], id="тысячи-без-пробела"),
+        # 2026 есть в двух разделах, но 34 — только в масштабе: ссылка на него
+        # прослеживает и год.
+        pytest.param(answer(visualization=chart([34, 61])), [SCALE], id="диаграмма"),
+    ],
+)
+def test_number_found_in_one_section_only_gets_its_anchor_from_code(given: str, expected: list[str]) -> None:
+    """Вариант (а) вопроса T23 — урок T-51 и T-52: модель пишет, решает код.
+    Число, которое есть ровно в одном разделе фактуры, оттуда и взято, и
+    повтор ради ссылки на этот раздел стоил бы запроса. Найдено T-59: с каждым
+    повтором модель добавляла одну ссылку из нескольких нужных."""
+    provider = regular(s2=[given])
+    result = generate(provider)
+
+    assert len(provider.for_slide(2)) == 1
+    assert result.slides[1].source_refs == expected
+
+
+def test_slide_that_stays_wrong_keeps_what_is_traced_and_names_what_is_dropped() -> None:
+    """Вариант (б) вопроса T23: колода собирается, слайд — из последнего ответа.
+
+    Число, которого нет в фактуре, на слайд не попадает: пункт с ним убран и
+    назван, заголовок и ключевое сообщение остаются из структуры колоды.
+    Число, которое в фактуре есть, но в нескольких разделах, остаётся — то
+    ли это число, решает человек по предупреждению проверки текста."""
+    wrong = answer(
+        headline="Удержание выросло на 20%",
+        key_message="Каждый пятый остался бы — 20%",
+        body=["Пилот шёл в 2026 году", "Отток упал на 20%"],
+        refs=[FRAME],
+    )
+    provider = regular(s2=[wrong] * 3)
+    result = generate(provider)
+
+    assert len(provider.for_slide(2)) == 3
+    degraded = result.slides[1]
+    assert (degraded.headline, degraded.key_message) == ("Заголовок 2", "Мысль 2")
+    assert degraded.body is not None and degraded.body.items == ["Пилот шёл в 2026 году"]
+    assert degraded.source_refs == [FRAME]
+    assert [(item.text, item.numbers) for item in degraded.omitted] == [("Отток упал на 20%", ["20"])]
+    # Остальные слайды написаны как обычно.
+    assert result.slides[2].body.items == ["Удержание выросло с 78% до 89%"]
+    assert result.slides[2].omitted == []
+
+
+def test_visualization_with_an_invented_number_is_dropped_whole() -> None:
+    """Диаграмма без одной точки или таблица без ячейки врут сильнее, чем
+    слайд без них."""
+    wrong = answer(visualization=table([["I кв. 2026", "34"], ["II кв. 2026", "35"]]), refs=[SCALE])
+    provider = regular(s2=[wrong] * 3)
+    result = generate(provider)
+
+    degraded = result.slides[1]
+    assert degraded.visualization is None and degraded.body is None
+    [dropped] = degraded.omitted
+    assert dropped.numbers == ["35"] and "Квартал" in dropped.text
+
+
+@pytest.mark.parametrize(
+    ("role", "wrong", "body", "visual"),
+    [
+        pytest.param("title", answer(body=["Подзаголовок"], refs=[RESULTS]), None, False, id="титул-с-телом"),
+        pytest.param("data", answer(body=["Пункт"], visualization=chart([34, 61]), refs=[SCALE]), None, True, id="тело-и-визуализация"),
+        pytest.param("data", answer(body=["Пункт"], visualization=chart([34]), refs=[SCALE]), ["Пункт"], False, id="визуализация-не-собрана"),
+    ],
+)
+def test_degraded_slide_keeps_the_shape_the_layout_expects(
+    role: str, wrong: str, body: list[str] | None, visual: bool
+) -> None:
+    """Слайд, собранный из неудачного ответа, вёрстка принимает как обычный:
+    у титула нет тела, у слайда не бывает и тела, и визуализации — так их и
+    свёрстали бы, — а несобранная визуализация не показывается."""
+    provider = Provider({1: [wrong] * 3, 2: [content_answer()]})
+    result = generate(provider, structure(role, "closing"))
+
+    slide = result.slides[0]
+    assert (slide.body.items if slide.body else None) == body
+    assert (slide.visualization is not None) == visual
+
+
+def test_answer_that_never_parsed_stops_with_the_stage_named_and_spends_no_more() -> None:
+    """Модель недоступна или отвечает не по схеме — ошибка этапа (EF-8):
+    сохранять из такого ответа нечего. Слайды, до которых очередь не дошла,
+    не запрашиваются: их ответы выбросили бы."""
+    provider = regular(s1=["не JSON"] * 3)
 
     with pytest.raises(ModelError) as error:
         generate(provider, workers=1)
 
     assert error.value.stage == CONTENT_STAGE == "Содержание слайдов"
-    # Частичной колоды нет (EF-8), а слайды, до которых очередь не дошла,
-    # не запрашиваются: ответ на них выбросили бы.
     assert len(provider.requests) == 3
     assert {task(body)["slide"]["number"] for body in provider.requests} == {1}
+
+
+def test_provider_failure_after_an_answer_keeps_that_answer() -> None:
+    """Так оборвался третий запрос в диагностике T-59: ответ второй попытки
+    годится для слайда, хотя последней попытке провайдер не ответил."""
+    wrong = answer(body=["Пилот шёл в 2026 году", "Отток упал на 20%"], refs=[FRAME])
+    provider = regular(s2=[wrong, wrong, 503])
+    result = generate(provider)
+
+    assert result.slides[1].body.items == ["Пилот шёл в 2026 году"]

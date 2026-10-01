@@ -6,7 +6,9 @@
 
 **Невалидный ответ дальше не уходит** (EF-8). Клиент повторяет запрос,
 показывая модели её последний ответ и ошибку проверки; после исчерпания
-попыток поднимает `ModelError` с названием этапа. Частичного результата нет.
+попыток поднимает `ModelError` с названием этапа. Частичного результата нет:
+последний ответ модели ошибка несёт с собой, и решать, можно ли из него
+что-то сохранить, — тому, кто знает смысл ответа (T-61).
 
 Сбой провайдера — таймаут, HTTP 429 и 5xx, ответ без `choices` — тоже
 повторяется, но с прежними сообщениями: чинить в ответе нечего. Отказ
@@ -49,12 +51,17 @@ MAX_REPORTED_ERRORS = 10
 
 
 class ModelError(RuntimeError):
-    """Модель не дала годного ответа; сообщение называет этап (EF-8)."""
+    """Модель не дала годного ответа; сообщение называет этап (EF-8).
 
-    def __init__(self, stage: str, message: str, attempts: int) -> None:
+    `answer` — текст последнего ответа модели, не прошедшего проверку, или
+    `None`, если модель не ответила ни разу.
+    """
+
+    def __init__(self, stage: str, message: str, attempts: int, answer: str | None = None) -> None:
         super().__init__(f"Этап «{stage}»: {message}")
         self.stage = stage
         self.attempts = attempts
+        self.answer = answer
 
 
 class ProviderFailure(Exception):
@@ -94,6 +101,7 @@ class ModelClient:
         messages = base
         attempts = self.settings.max_attempts
         reason = ""
+        answer = None
 
         with httpx.Client(timeout=self.settings.timeout_sec, transport=self.transport) as http:
             for attempt in range(1, attempts + 1):
@@ -108,6 +116,7 @@ class ModelClient:
                 try:
                     return schema.model_validate_json(extract_json(text))
                 except ValidationError as error:
+                    answer = text
                     reason = describe(error)
                     if finish == "length":
                         reason = (
@@ -125,6 +134,7 @@ class ModelClient:
             f"модель {self.settings.model} не вернула ответ по схеме {schema.__name__} "
             f"(попыток: {attempts}). Последняя причина: {reason}",
             attempts,
+            answer,
         )
 
     def _send(
