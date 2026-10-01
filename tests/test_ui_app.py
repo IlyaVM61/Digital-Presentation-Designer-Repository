@@ -34,10 +34,13 @@ OUTLINE = """Итоги пилота
 
 
 @pytest.fixture
-def out_dir(tmp_path: Path) -> Iterator[Path]:
+def out_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    # Через monkeypatch, а не os.environ: без восстановления каждый тест
+    # вкладывал `tests/ui` в каталог предыдущего, и к третьему десятку тестов
+    # путь превышал предел длины пути Windows.
     base = Path(os.environ.get("DPD_OUTPUT_DIR", "D:/dpd-out")) / "tests" / "ui"
     base.mkdir(parents=True, exist_ok=True)
-    os.environ["DPD_OUTPUT_DIR"] = str(base)
+    monkeypatch.setenv("DPD_OUTPUT_DIR", str(base))
     yield base
 
 
