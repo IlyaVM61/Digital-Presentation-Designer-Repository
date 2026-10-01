@@ -49,6 +49,13 @@ LibreOffice: 16,6 с против 8,8 с на одну и около 26 с тр�
 визуала пропущенными, `look` смотрит выбранный и дописывает находки.
 Исправление по выбору меняет слайды — замечания модели о прежних
 изображениях после него сбрасываются, проверки снова названы пропущенными.
+
+**Колоду по контент-пакету пишет `draft`** (T-58): структура и содержание
+слайдов от модели, затем аудит текста — до вёрстки, как в батче. Шаг живёт
+здесь, а не в интерфейсе, по той же причине, что и прогон: страница его
+только вызывает. Время обоих шагов идёт в отчёт аудита текста, а прогон
+ставит его первым в разбивку каждого варианта: бюджет D4 считается по
+полному циклу, и генерация в нём самая долгая часть.
 """
 
 from __future__ import annotations
@@ -65,12 +72,13 @@ from dpd.audit import AuditContext, discover
 from dpd.audit.checks import check_variant_distinction
 from dpd.audit.fixer import repair
 from dpd.audit.remedies import Choice, Remedy, apply_remedies, options
-from dpd.audit.textual import attach
+from dpd.audit.textual import attach, audit_text
 from dpd.audit.visual import audit_visual
 from dpd.export import export_html, export_pdf, export_pptx
+from dpd.generation import ContentPack, generate_presentation
 from dpd.layout import compose_variants
 from dpd.layout.variants import load_profiles
-from dpd.llm import ModelClient, PromptSet, load_prompts
+from dpd.llm import ModelClient, ModelError, PromptSet, load_prompts
 from dpd.models import (
     AuditReport,
     Finding,
@@ -96,8 +104,30 @@ STAGE_TITLES = {
 """Названия для интерфейса: пользователь ждёт десятки секунд и должен видеть,
 что именно происходит. Словами пользователя, а не вёрстки (T-55)."""
 
+DRAFT_STAGES: tuple[str, ...] = ("generate", "review")
+"""Шаги до прогона, когда колоду пишет модель (T-58). Их нет в `STAGES`:
+прогон по плану, написанному человеком, их не проходит."""
+
+DRAFT_TITLES = {
+    "generate": "Пишем текст слайдов",
+    "review": "Проверяем текст",
+}
+
 Progress = Callable[[str, int, int], None]
 """Событие прогресса: этап, сколько сделано, сколько всего."""
+
+
+@dataclass(frozen=True)
+class Draft:
+    """Колода от модели и аудит её текста; время шагов — в `text_audit.timings`.
+
+    `review_error` — почему смысловая проверка текста не выполнена: колода от
+    этого не останавливается, но молчать о пропуске нельзя.
+    """
+
+    structure: PresentationStructure
+    text_audit: AuditReport
+    review_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -159,6 +189,40 @@ class RunResult:
     вариант."""
     text_audit: AuditReport | None = None
     """Аудит текста колоды (T-51): `revise` дописывает его в свежий отчёт."""
+
+
+def draft(
+    pack: ContentPack,
+    client: ModelClient,
+    prompts: PromptSet,
+    *,
+    progress: Progress | None = None,
+) -> Draft:
+    """Колода по контент-пакету и аудит её текста — до вёрстки (T-58).
+
+    Сбой генерации поднимает `ModelError`: частичной колоды дальше не уходит
+    (EF-8). Сбой модели на проверке текста колоду не останавливает — как в
+    батче, смысловые проверки названы пропущенными, а причина возвращается.
+    """
+    report_progress = progress or (lambda *_: None)
+    timings: dict[str, float] = {}
+    review_error = None
+
+    with _timed(timings, "generate"):
+        report_progress("generate", 0, 1)
+        structure = generate_presentation(pack, client, prompts)
+        report_progress("generate", 1, 1)
+
+    with _timed(timings, "review"):
+        report_progress("review", 0, 1)
+        try:
+            text_audit = audit_text(structure, pack, client, prompts)
+        except ModelError as error:
+            review_error = str(error)
+            text_audit = audit_text(structure, pack)
+        report_progress("review", 1, 1)
+
+    return Draft(structure, text_audit.model_copy(update={"timings": timings}), review_error)
 
 
 def run_pipeline(
@@ -231,6 +295,9 @@ def run_pipeline(
     # этап роняет сортировку: без места в `STAGES` у него нет ни названия,
     # ни доли в полосе прогресса.
     timings = dict(sorted(timings.items(), key=lambda item: STAGES.index(item[0])))
+    # Колоду, написанную моделью, прогон получает готовой, но её время —
+    # часть цикла (D4): шаги черновика встают первыми, как шли.
+    timings = {**(text_audit.timings if text_audit else {}), **timings}
     # Разбивка времени принадлежит отчёту (NFR-1а): он остаётся от прогона,
     # когда интерфейс закрыт. Этапы общие для трёх вариантов — разбор один,
     # конвертация одна, — и делить время между вариантами значило бы его

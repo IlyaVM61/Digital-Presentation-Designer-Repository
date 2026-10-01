@@ -618,3 +618,89 @@ def test_revision_drops_what_the_model_saw_before_it(
     fresh = revised.reports[variant]
     assert not [f for f in fresh.findings if f.check_id in VISUAL]
     assert set(VISUAL) <= set(fresh.checks_skipped)
+
+
+# --- Черновик колоды по контент-пакету (T-58) ---------------------------------
+#
+# Интерфейс и батч пишут колоду одинаково: структура и содержание от модели,
+# затем аудит текста — до вёрстки. Страница ничего не считает сама, поэтому
+# этот шаг живёт здесь, рядом с прогоном, с событиями прогресса и замером.
+
+PACK = Path(__file__).resolve().parents[1] / "assets" / "content-pack"
+
+
+def writer(fail_on: str | None = None):
+    """LLM-подделка батча T-50; `fail_on` — схема ответа, на которой провайдер отказывает."""
+    import httpx
+    from test_batch import SETTINGS, fake_model
+
+    from dpd.llm import build_client, load_prompts
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        import json
+
+        if json.loads(request.content)["response_format"]["json_schema"]["name"] == fail_on:
+            return httpx.Response(400, json={"error": "отказ провайдера"})
+        return fake_model(request)
+
+    prompts = load_prompts()
+    return build_client(SETTINGS, prompts, transport=httpx.MockTransport(reply)), prompts
+
+
+def test_draft_writes_the_deck_and_checks_its_text() -> None:
+    """Критерий T-58 со стороны оркестратора: колода от модели и аудит её
+    текста одним вызовом, со временем каждого шага — оно входит в бюджет
+    полного цикла (D4)."""
+    from test_batch import GENERATED_BODY
+
+    from dpd.generation import load_content_pack
+    from dpd.orchestrator import DRAFT_STAGES, draft
+
+    events: list[str] = []
+    drafted = draft(load_content_pack(PACK), *writer(), progress=lambda stage, done, total: events.append(stage))
+
+    assert any(slide.body and GENERATED_BODY in slide.body.items for slide in drafted.structure.slides)
+    assert "content.headline_no_conclusion" in drafted.text_audit.checks_run
+    assert not [item for item in drafted.text_audit.checks_skipped if item.endswith(":model")]
+    assert drafted.review_error is None
+    assert list(drafted.text_audit.timings) == list(DRAFT_STAGES)
+    assert list(dict.fromkeys(events)) == list(DRAFT_STAGES)
+
+
+def test_failed_text_check_does_not_stop_the_deck() -> None:
+    """Сбой модели на проверке текста колоды не останавливает — как в батче:
+    смысловые проверки названы пропущенными, причина возвращается, чтобы
+    интерфейс её показал, а не проглотил."""
+    from dpd.generation import load_content_pack
+    from dpd.orchestrator import draft
+
+    drafted = draft(load_content_pack(PACK), *writer(fail_on="TextReview"))
+
+    assert drafted.structure.slides
+    assert drafted.review_error and "HTTP 400" in drafted.review_error
+    assert [item for item in drafted.text_audit.checks_skipped if item.endswith(":model")]
+
+
+def test_failed_generation_stops_before_the_layout() -> None:
+    """Частичной колоды дальше не уходит (EF-8): сбой генерации — исключение."""
+    from dpd.generation import load_content_pack
+    from dpd.llm import ModelError
+    from dpd.orchestrator import draft
+
+    with pytest.raises(ModelError):
+        draft(load_content_pack(PACK), *writer(fail_on="DeckOutline"))
+
+
+def test_draft_time_leads_the_run_timings(template: Path, out_dir: Path) -> None:
+    """Разбивка времени принадлежит отчёту (NFR-1а): время написания и
+    проверки текста стоит в нём первым, по ходу цикла, а не теряется в
+    интерфейсе."""
+    from dpd.generation import load_content_pack
+    from dpd.orchestrator import DRAFT_STAGES, draft
+
+    drafted = draft(load_content_pack(PACK), *writer())
+    result = run_pipeline(template, drafted.structure, out_dir / "draft-timings", formats=("html",), text_audit=drafted.text_audit)
+
+    stages = [stage for stage in STAGES if stage in result.timings]
+    for report in result.reports.values():
+        assert list(report.timings) == [*DRAFT_STAGES, *stages]
