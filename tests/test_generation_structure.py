@@ -168,6 +168,7 @@ def test_impossible_range_is_refused_before_the_request(bad: tuple[int, int]) ->
         pytest.param(outline(12, first_role="data"), id="первый-не-титульный"),
         pytest.param(outline(12, key_message=""), id="без-ключевого-сообщения"),
         pytest.param(outline(12, first_role="intro"), id="роль-вне-словаря"),
+        pytest.param(outline(12).replace('"closing"', '"data"').replace('"agenda"', '"closing"'), id="завершение-не-последним"),
     ],
 )
 def test_wrong_outline_is_repaired_by_a_second_request(wrong: str) -> None:

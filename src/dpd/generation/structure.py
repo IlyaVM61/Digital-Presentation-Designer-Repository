@@ -35,6 +35,7 @@ DEFAULT_SLIDE_RANGE = (10, 15)
 Пользователь вправе задать свой; тогда он заменяет этот диапазон целиком."""
 
 OPENING_ROLES = ("title", "cover")
+CLOSING_ROLE = "closing"
 
 
 class OutlineMeta(Contract):
@@ -60,12 +61,20 @@ class DeckOutline(Contract):
     slides: list[OutlineSlide]
 
     @model_validator(mode="after")
-    def opens_with_title(self) -> DeckOutline:
-        # Правило вне схемы: его держит не провайдер, а повтор клиента.
+    def opens_with_title_and_ends_with_closing(self) -> DeckOutline:
+        # Правила вне схемы: их держит не провайдер, а повтор клиента.
         if self.slides and self.slides[0].role not in OPENING_ROLES:
             raise ValueError(
                 f"первый слайд колоды — титульный: роль {' или '.join(OPENING_ROLES)}, "
                 f"а не {self.slides[0].role}"
+            )
+        # Живой прогон дал выводы после завершения, и они объявили запрос
+        # уже утверждённым: слайд после `closing` пересказывает финал.
+        early = [n for n, slide in enumerate(self.slides[:-1], start=1) if slide.role == CLOSING_ROLE]
+        if early:
+            raise ValueError(
+                f"слайд с ролью {CLOSING_ROLE} завершает колоду и стоит последним, "
+                f"а здесь он на месте {early[0]} из {len(self.slides)}"
             )
         return self
 
