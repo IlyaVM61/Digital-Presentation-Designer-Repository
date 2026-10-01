@@ -11,16 +11,18 @@
 # CLAUDE.md): найденное на нём записывается в handoff, а не подгоняется в
 # коде. В перечень девяти колод (`configs/decks.yaml`) он не входит.
 #
-# Версия: 1. Изменения фиксируются здесь же.
+# Версия: 2. Изменения фиксируются здесь же.
 #
 # 2026-10-01: Jessica использована для отладки T-57 и приёмочной больше не
-# считается (решение владельца по T20). Здесь она до замены: новый шаблон
-# выбирает T-59 и вписывает сюда.
+# считается (решение владельца по T20).
+# v2, 2026-10-01 (T-59): приёмочный шаблон — BRISA Master Presentation
+# Template, CC BY 4.0; карточка и атрибуция — в README каталога. Jessica
+# перенесена в assets/templates/debug/.
 
-version: 1
+version: 2
 
 templates_dir: assets/templates/acceptance
 
 templates:
   - slug: external
-    file: Jessica · SlidesCarnival.pptx
+    file: BRISA Master Presentation Template.pptx

@@ -116,6 +116,41 @@ def test_acceptance_template_stays_out_of_the_nine_decks() -> None:
     assert all(template.parent != ACCEPTANCE_DIR for _, template in load_matrix())
 
 
+DEBUG_DIR = batch.ROOT / "assets" / "templates" / "debug"
+DEBUGGED = "Jessica · SlidesCarnival.pptx"
+TEMPLATE_SUFFIXES = (".pptx", ".potx")
+
+
+def test_acceptance_template_is_not_the_debugged_one() -> None:
+    """T-59: шаблон, на котором отлаживали, приёмку не доказывает.
+
+    Jessica разобрана в T-57 (решение по T20) и переехала в `debug/`; в
+    `acceptance/` остаётся только тот шаблон, на который указывает перечень.
+    """
+    (_, template), = load_matrix(ACCEPTANCE_MATRIX)
+    assert template.name != DEBUGGED
+    assert (DEBUG_DIR / DEBUGGED).is_file()
+    found = [path for path in ACCEPTANCE_DIR.iterdir() if path.suffix in TEMPLATE_SUFFIXES]
+    assert found == [template]
+
+
+@pytest.mark.parametrize("folder", [ACCEPTANCE_DIR, DEBUG_DIR], ids=["acceptance", "debug"])
+def test_every_kept_template_has_a_license_card(folder: Path) -> None:
+    """Шаблон без карточки не используется (README приёмочного каталога).
+
+    Лицензия CC BY требует атрибуции там, где шаблон лежит, — в том числе
+    после переезда в другой каталог.
+    """
+    readme = (folder / "README.md").read_text(encoding="utf-8")
+    templates = [path for path in folder.iterdir() if path.suffix in TEMPLATE_SUFFIXES]
+    assert templates, f"в {folder.name}/ нет шаблона"
+    for template in templates:
+        card = readme.split(f"Файл:            {template.name}", 1)
+        assert len(card) == 2, f"нет карточки для {template.name}"
+        for field in ("Источник:", "Правообладатель:", "Лицензия:"):
+            assert field in card[1].split("```", 1)[0], f"в карточке {template.name} нет «{field}»"
+
+
 def test_deck_name_follows_the_deliverables_scheme() -> None:
     assert deck_name("vk-tech", "A") == "vk-tech__a"
     assert deck_name("vk-education", "c") == "vk-education__c"
