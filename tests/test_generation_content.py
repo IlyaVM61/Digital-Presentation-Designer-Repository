@@ -388,6 +388,30 @@ def test_number_written_in_words_in_the_facts_may_go_to_the_slide_in_digits(text
     assert fact_numbers(text) == expected
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Затраты — 2,8 млн ₽, эффект — 9,4 млн ₽", {"2.8", "2800000", "9.4", "9400000"}),
+        ("месяц стоит 49 тыс. ₽", {"49", "49000"}),
+        ("оборот 1,5 млрд", {"1.5", "1500000000"}),
+    ],
+)
+def test_number_with_a_scale_word_may_go_to_the_slide_in_full(text: str, expected: set[str]) -> None:
+    """Найдено живым прогоном: «2,8 млн ₽» ушло в точку диаграммы как 2800000 —
+    то же число; модель три попытки подряд не отказывалась от такой записи."""
+    assert fact_numbers(text) == expected
+
+
+def test_agenda_needs_no_source_it_is_made_of_the_deck() -> None:
+    """Пункты плана — части колоды, а не факты; ссылку модель ставила наугад."""
+    agenda = answer(body=["Результаты пилота", "Запрос"])
+    provider = regular(s2=[agenda])
+    result = generate(provider, structure("title", "agenda", "closing"))
+
+    assert len(provider.for_slide(2)) == 1
+    assert result.slides[1].source_refs == []
+
+
 def test_number_found_in_a_cited_section_passes_whatever_its_spelling() -> None:
     provider = regular(s2=[answer(body=["Прошли 1 240 человек, пар стало 61"], refs=[SCALE])])
     result = generate(provider)

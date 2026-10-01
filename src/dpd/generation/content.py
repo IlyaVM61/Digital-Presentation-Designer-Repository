@@ -29,6 +29,7 @@ import json
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import Field, create_model, model_validator
@@ -51,6 +52,10 @@ BODYLESS_ROLES = ("title", "cover")
 
 OPTIONAL_BODY_ROLES = (*BODYLESS_ROLES, "section", "divider")
 """Заставке достаточно названия раздела; тело делает её контентным слайдом."""
+
+DECK_ROLES = ("agenda",)
+"""Слайды, сделанные из состава колоды, а не из фактуры: ссылка им не нужна.
+Найдено живым прогоном — у плана колоды модель ставила ссылку наугад."""
 
 AXIS_FREE_CHARTS = ("pie",)
 """Круговой диаграмме оси не нужны — как в проверке `integrity.chart_no_labels`."""
@@ -77,6 +82,12 @@ NUMBER_WORDS = {
 нарочно: «каждый пятый» не равно «5», а тем более «20%»."""
 WORD_NUMBERS = {word: str(value) for value, words in NUMBER_WORDS.items() for word in words.split()}
 WORD = re.compile(r"\w+")
+
+SCALES = {"тыс": 10**3, "млн": 10**6, "млрд": 10**9}
+"""Множители фактуры: «2,8 млн ₽» на слайде можно записать как 2800000.
+Найдено живым прогоном — точка диаграммы. Число без множителя рядом не
+растягивается: иначе «5 этапов» пропустило бы выдуманные «5000»."""
+SCALED = re.compile(rf"({NUMBER.pattern})[   ]*({'|'.join(SCALES)})(?!\w)")
 
 
 # --- Разделы и числа фактуры ------------------------------------------------------
@@ -127,7 +138,10 @@ def fact_numbers(section: str) -> set[str]:
     ссылаться не на тот раздел.
     """
     words = {WORD_NUMBERS[word] for word in WORD.findall(section.lower()) if word in WORD_NUMBERS}
-    return numbers_in(LIST_NUMBER.sub("", section)) | words
+    scaled = {
+        number_text(float(Decimal(canonical(raw)) * SCALES[scale])) for raw, scale in SCALED.findall(section)
+    }
+    return numbers_in(LIST_NUMBER.sub("", section)) | words | scaled
 
 
 def canonical(raw: str) -> str:
@@ -193,7 +207,7 @@ def _shape_problems(content: SlideContent, role: str) -> list[str]:
         problems.append("у слайда и тело, и визуализация: визуализация занимает место тела, и текст тела пропал бы")
     if visual:
         problems.extend(_visual_problems(visual))
-    if (has_body or visual) and not content.source_refs:
+    if (has_body or visual) and not content.source_refs and role not in DECK_ROLES:
         problems.append("sourceRefs пуст: слайду с телом или визуализацией нужна ссылка на раздел фактуры")
     return problems
 
