@@ -337,6 +337,16 @@ def test_typo_names_the_fix() -> None:
     assert finding.evidence == {"slideId": "s1", "wrong": "Наставнеки", "right": "Наставники"}
 
 
+def test_number_is_not_a_typo() -> None:
+    """Живой прогон: модель «исправила» выдуманное число как опечатку —
+    «97%» на «81%» из соседней строки фактуры. Числа сверяет поиск по
+    материалам, воспроизводимо; догадка модели о верном числе — не опечатка."""
+    structure = deck(slide(1, body=bullets("Удовлетворённость наставников — 97%")))
+    review = review_of(structure, with_remarks(structure, "s1", typos=[{"wrong": "97%", "right": "81%"}]))
+
+    assert check_typos(structure, review) == []
+
+
 def test_table_row_off_the_point_is_reported() -> None:
     structure = sample()
     review = review_of(structure, with_remarks(structure, "s3", offPointItems=["II кв."]))

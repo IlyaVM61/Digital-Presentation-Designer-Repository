@@ -146,7 +146,12 @@ def check_slides_disconnected(structure: PresentationStructure, review: TextRevi
 
 @check(TYPOS)
 def check_typos(structure: PresentationStructure, review: TextReview) -> list[Finding]:
-    """Вопрос 8: текст без опечаток. Находка называет исправление."""
+    """Вопрос 8: текст без опечаток. Находка называет исправление.
+
+    «Опечатка» с цифрами отбрасывается: живой прогон показал, что модель так
+    «исправляет» выдуманное число на число из соседней строки фактуры. Числа
+    сверяет `content.unsourced_numbers` — по материалам и воспроизводимо.
+    """
     return [
         TYPOS.finding(
             f"Опечатка: «{typo.wrong}» — вероятно, «{typo.right}».",
@@ -155,6 +160,7 @@ def check_typos(structure: PresentationStructure, review: TextReview) -> list[Fi
         )
         for number, slide, answer in _answered(structure, review)
         for typo in answer.typos
+        if not any(char.isdigit() for char in typo.wrong + typo.right)
     ]
 
 
