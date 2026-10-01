@@ -63,17 +63,20 @@ def test_layout_without_content_slots_is_not_content(name: str) -> None:
     нечего положить, значило бы гарантировать пустой слайд.
     """
     for layout in parse_template(requires(name)).layouts:
-        has_content = any(slot.kind != "title" for slot in layout.slots)
+        # Номер слайда и колонтитулы (`other`) — не место под содержимое (T-57).
+        has_content = any(slot.kind == "body" for slot in layout.slots)
         if not has_content:
             assert layout.family in {"section", "blank"}
 
 
 @pytest.mark.parametrize("name", ALL)
 def test_layouts_with_several_content_slots_are_split(name: str) -> None:
+    """Без слота заголовка макет запасной (`blank`), даже с местами под тело (T-57)."""
     for layout in parse_template(requires(name)).layouts:
-        content = [slot for slot in layout.slots if slot.kind != "title"]
+        content = [slot for slot in layout.slots if slot.kind == "body"]
+        titled = any(slot.kind == "title" for slot in layout.slots)
         if len(content) >= 2:
-            assert layout.family == "split"
+            assert layout.family == ("split" if titled else "blank")
 
 
 def test_classification_is_deterministic() -> None:

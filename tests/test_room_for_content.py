@@ -25,7 +25,7 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE
 
 from dpd.layout.selector import select
-from dpd.models import Bounds, Layout, Slot, SlideBody, StructureSlide
+from dpd.models import Bounds, Layout, SlideBody, Slot, StructureSlide
 from dpd.parsing import parse_template
 
 MASTER_DECOR_LEFT = 0.82

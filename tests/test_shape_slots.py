@@ -42,22 +42,35 @@ def test_workspace_layouts_get_more_than_one_slot() -> None:
     сконструировать его значило бы положить текст поверх картинки — то есть
     породить дефект вместо слота.
 
-    Поэтому проверяется, что место под содержимое находится у подавляющего
-    большинства макетов. Расхождение с формулировкой бэклога зафиксировано
-    в `tasks.md` и в `open-questions.md` (T13).
+    Поэтому проверяется, что место под содержимое находится у большинства
+    макетов. Расхождение с формулировкой бэклога зафиксировано в `tasks.md`
+    и в `open-questions.md` (T13).
+
+    **Порог снижен в T-57 с 0,8 до 2/3 — по рендеру, а не под результат.**
+    Ещё у двух макетов (`layout13`, `layout14`) второй слот давали залитые
+    прямоугольники без текста — декор, который считался «текстовой рамкой»,
+    потому что рамка в python-pptx есть у любой автофигуры. Это заставки:
+    заголовок в центре, плашки у края. Колода на WorkSpace с исправлением
+    собрана той же структурой: сменился только макет обложки, находки
+    аудита те же.
     """
     layouts = parse_template(requires(WORKSPACE)).layouts
     rich = [layout for layout in layouts if len(layout.slots) > 1]
-    assert len(rich) / len(layouts) >= 0.8, (
+    assert len(rich) / len(layouts) >= 2 / 3, (
         f"только {len(rich)} из {len(layouts)} макетов получили больше одного слота"
     )
 
 
 def test_shape_slots_are_marked_as_such() -> None:
-    """Происхождение слота влияет на доверие к нему и должно быть видно."""
+    """Происхождение слота влияет на доверие к нему и должно быть видно.
+
+    На WorkSpace место под содержимое конструируется: «текстовые рамки»
+    этого шаблона оказались пустым декором (T-57). Слот из фигуры с текстом
+    проверяется на синтетическом шаблоне, `test_room_for_content.py`.
+    """
     slots = [slot for layout in parse_template(requires(WORKSPACE)).layouts for slot in layout.slots]
     origins = {slot.origin for slot in slots}
-    assert "shape" in origins, "ни один слот не выведен из фигуры"
+    assert "derived" in origins, "ни один слот не сконструирован"
     assert origins <= {"placeholder", "shape", "derived"}
 
 
@@ -85,7 +98,7 @@ def test_decorations_are_not_mistaken_for_slots() -> None:
     Ложный слот хуже пропущенного: вёрстка положит в него текст, и он уедет
     в угол поверх логотипа.
     """
-    layouts = parse_template(requires(WORKSPACE)).layouts
+    layouts = [layout for name in (WORKSPACE, VK_TECH, EDUCATION) for layout in parse_template(requires(name)).layouts]
     shape_slots = [slot for layout in layouts for slot in layout.slots if slot.origin == "shape"]
     assert shape_slots
     for slot in shape_slots:
