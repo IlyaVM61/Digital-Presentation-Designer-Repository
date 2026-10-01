@@ -55,8 +55,8 @@ def ask(key: str, model: str) -> tuple[bool, str]:
         message = body["choices"][0]["message"]
         # Рассуждающие модели (Qwen3 и другие) кладут ответ в `reasoning`, а
         # `content` оставляют пустым, если лимит токенов не дал завершить
-        # размышление. Пустой `content` — не отказ провайдера, и клиент
-        # модели (T-47) обязан это учитывать.
+        # размышление. Пустой `content` — не отказ провайдера; клиент
+        # модели пайплайна (`dpd.llm.client`, T-47) читает оба поля так же.
         text = (message.get("content") or message.get("reasoning") or "").strip()
         return True, text[:60] or "пустой ответ (модель рассуждающая)"
     except urllib.error.HTTPError as error:
