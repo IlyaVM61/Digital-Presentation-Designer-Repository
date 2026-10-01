@@ -186,15 +186,34 @@ def check_text_overflow(deck: RenderedPresentation) -> list[Finding]:
     """Найти текст, не поместившийся в свою рамку.
 
     Порога у проверки нет: вместимость считается метрикой гарнитуры и кегля,
-    и настраивать здесь нечего. Вёрстка компенсирует переполнение кеглем и
-    обрезкой, поэтому на честно собранной колоде проверка молчит; сработать
-    она должна там, где компенсации не справились.
+    и настраивать здесь нечего. Вёрстка компенсирует переполнение кеглем, а
+    когда шкала исчерпана — сокращает текст. **Сокращённый текст в рамку
+    помещается, но не поместился**, и проверка называет его (T-60): иначе
+    честная метрика превратила бы видимый на рендере хвост в тихую потерю
+    содержания. Сработать без сокращения проверка должна там, где
+    компенсации не справились.
     """
     findings: list[Finding] = []
     for number, slide in enumerate(deck.slides, start=1):
+        cut = {item.slot_id: item for item in slide.applied_compensations if item.kind == "truncate"}
         for element in _text_elements(slide.elements):
             paragraphs, size = _paragraphs(element)
-            if text_fits(paragraphs, element.bounds, deck.canvas, size, element.frame):
+            fitted = text_fits(paragraphs, element.bounds, deck.canvas, size, element.frame)
+            if fitted and element.slot_id in cut:
+                lost = cut[element.slot_id]
+                findings.append(
+                    TEXT_OVERFLOW.finding(
+                        f"Слайд {number}: текст блока «{element.slot_id}» не поместился и при "
+                        f"наименьшем кегле шаблона {size:g} pt и сокращён "
+                        f"с {lost.from_value:g} знаков до {lost.to_value:g}.",
+                        slide_number=number,
+                        slot_id=element.slot_id,
+                        evidence={"sizePt": size, "truncated": True,
+                                  "chars": lost.from_value, "kept": lost.to_value},
+                    )
+                )
+                continue
+            if fitted:
                 continue
             findings.append(
                 TEXT_OVERFLOW.finding(

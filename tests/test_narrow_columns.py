@@ -161,6 +161,27 @@ def test_overflow_check_measures_with_the_frame() -> None:
     assert [finding.check_id for finding in findings] == ["layout.text_overflow"]
 
 
+def test_overflow_check_names_text_cut_by_the_layout() -> None:
+    """Сокращённый вёрсткой текст помещается, но не поместился: проверка называет его.
+
+    Честная метрика превращает выход за край в сокращение с многоточием, и
+    без этой находки потеря содержания стала бы тихой — хуже, чем видимый
+    на рендере хвост.
+    """
+    tiny = Slot(
+        id="body-1", kind="body", origin="placeholder", bounds=Bounds(x=0.06, y=0.26, w=0.208, h=0.2),
+        text_style=TextStyle(font="Arial", size_pt=14.0, resolved_from="layout.lstStyle"), frame=BULLETED,
+    )
+    layout = Layout(id="m/tiny", name="Колонка", family="content", slots=[TITLE, tiny])
+    deck = compose(_text_slide(WAVES), _schema(layout))
+    assert any(item.kind == "truncate" for item in deck.slides[0].applied_compensations)
+
+    findings = [item for item in check_text_overflow(deck) if item.slot_id == "body-1"]
+    assert len(findings) == 1
+    assert findings[0].evidence.get("truncated") is True
+    assert "сокращ" in findings[0].message
+
+
 # --- Разбор кладёт в схему то, что отнимает место у текста -----------------
 
 
