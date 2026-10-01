@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from dpd.layout.contrast import readable
 from dpd.models import ChartSpec, DesignTokens, RenderedChart, Slot
 
 CHART_SIZE_STEPS_DOWN = 2
@@ -29,8 +30,14 @@ NEUTRAL_SPREAD = 30
 подписями и сеткой."""
 
 
-def build(spec: ChartSpec, slot: Slot, tokens: DesignTokens | None) -> RenderedChart:
-    """Собрать диаграмму с оформлением из правил шаблона."""
+def build(
+    spec: ChartSpec, slot: Slot, tokens: DesignTokens | None, background: str | None = None
+) -> RenderedChart:
+    """Собрать диаграмму с оформлением из правил шаблона.
+
+    `background` — цвет фона макета, если он вычислим: по нему выбирается
+    цвет подписей.
+    """
     colours = _series_colours(len(spec.series), tokens, slot)
     return RenderedChart(
         chart_type=spec.chart_type,
@@ -42,10 +49,7 @@ def build(spec: ChartSpec, slot: Slot, tokens: DesignTokens | None) -> RenderedC
         has_legend=len(spec.series) > 1,
         font=_font(tokens, slot),
         size_pt=_size(tokens, slot),
-        # Фона у диаграммы нет: подписи лежат на фоне слайда и набираются,
-        # как основной текст. Без цвета их красила программа просмотра —
-        # чёрным, в том числе по чёрному фону (T-56).
-        text_color=slot.text_style.color if slot.text_style else None,
+        text_color=_text_colour(slot, tokens, background),
     )
 
 
@@ -66,6 +70,19 @@ def _series_colours(count: int, tokens: DesignTokens | None, slot: Slot) -> list
         return [fallback] * count if fallback else []
 
     return [ordered[index % len(ordered)] for index in range(count)]
+
+
+def _text_colour(slot: Slot, tokens: DesignTokens | None, background: str | None) -> str | None:
+    """Цвет названия, подписей осей, категорий и легенды (T-56).
+
+    Фона у диаграммы нет: подписи лежат на фоне слайда и набираются, как
+    основной текст, — если он читается на фоне их мелким кеглем; иначе
+    первым читаемым цветом палитры. Без цвета подписи красила программа
+    просмотра — чёрным, в том числе по чёрному фону.
+    """
+    own = slot.text_style.color if slot.text_style else None
+    palette = [token.value for token in tokens.colors] if tokens else []
+    return readable([own, *palette], background) or own
 
 
 def _is_saturated(value: str) -> bool:

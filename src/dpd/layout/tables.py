@@ -14,17 +14,13 @@
 
 from __future__ import annotations
 
+from dpd.layout.contrast import readable
 from dpd.models import Compensation, DesignTokens, RenderedTable, Slot, TableSpec
 
 MAX_ROWS = 7
 """Строк вместе с шапкой. Порог из чек-листа аудита."""
 
 MAX_COLUMNS = 5
-
-HEADER_MIN_CONTRAST = 4.5
-"""Контраст текста шапки к её заливке — порог WCAG AA для обычного текста,
-тот же, что у проверки `template.contrast_low`. Кегль таблицы мельче
-основного текста, и сниженный порог крупного текста к ней не относится."""
 
 TABLE_SIZE_STEPS_DOWN = 2
 """На сколько ступеней шкалы кегль таблицы мельче основного текста.
@@ -37,8 +33,13 @@ def build(
     spec: TableSpec,
     slot: Slot,
     tokens: DesignTokens | None,
+    background: str | None = None,
 ) -> tuple[RenderedTable, list[Compensation]]:
-    """Собрать таблицу и вернуть её вместе с применёнными компенсациями."""
+    """Собрать таблицу и вернуть её вместе с применёнными компенсациями.
+
+    `background` — цвет фона макета, если он вычислим; под фоном-изображением
+    он неизвестен, и цвет строк остаётся тем, которым шаблон набирает слот.
+    """
     headers = spec.headers[:MAX_COLUMNS]
     rows = [row[: len(headers)] for row in spec.rows[: MAX_ROWS - 1]]
 
@@ -62,7 +63,8 @@ def build(
 
     # Строки выравниваются по ширине шапки: неровная сетка ломает экспорт.
     normalised = [row + [""] * (len(headers) - len(row)) for row in rows]
-    header_fill, header_colour = _header(tokens, slot)
+    body_colour = _body_colour(slot, tokens, background)
+    header_fill, header_colour = _header(tokens, body_colour)
 
     return (
         RenderedTable(
@@ -72,7 +74,7 @@ def build(
             size_pt=_size(tokens, slot),
             header_color=header_colour,
             header_fill=header_fill,
-            body_color=_body_colour(slot),
+            body_color=body_colour,
         ),
         compensations,
     )
@@ -93,23 +95,21 @@ def _size(tokens: DesignTokens | None, slot: Slot) -> float | None:
     return scale[index]
 
 
-def _header(tokens: DesignTokens | None, slot: Slot) -> tuple[str | None, str | None]:
+def _header(tokens: DesignTokens | None, body: str | None) -> tuple[str | None, str | None]:
     """Заливка шапки и цвет её текста — одной парой (T-56).
 
     Шапка заливается брендовым цветом, если он в шаблоне есть: это
     единственная вольность, которую вёрстка себе позволяет, и она остаётся
     внутри палитры. Текст на заливке — первый читаемый на ней цвет: сначала
     цвет строк, чтобы таблица была набрана одним цветом, потом цвета палитры
-    по частоте. Цвет не из палитры не берётся — он выдал бы, что слайд собран
-    мимо шаблона, а аудит заменил бы его ближайшим из палитры, не глядя на
-    заливку.
+    по частоте. Цвет не из палитры не берётся: аудит заменил бы его ближайшим
+    из палитры, не глядя на заливку.
 
     Раньше заливку давал стиль таблицы по умолчанию — цвет акцента темы, а
     текст красился брендовым: где они совпадали, шапка исчезала. Если ни один
     цвет палитры на брендовом не читается, шапка остаётся без заливки и
     набирается, как строки.
     """
-    body = _body_colour(slot)
     brand = next(
         (token.value for token in tokens.colors if token.role == "brand.primary"), None
     ) if tokens else None
@@ -117,30 +117,20 @@ def _header(tokens: DesignTokens | None, slot: Slot) -> tuple[str | None, str | 
         return None, body
 
     palette = [token.value for token in tokens.colors]
-    candidates = [colour for colour in [body, *palette] if colour and colour != brand]
-    readable = next(
-        (colour for colour in candidates if _contrast(colour, brand) >= HEADER_MIN_CONTRAST), None
-    )
-    if readable is None:
+    text = readable([colour for colour in [body, *palette] if colour != brand], brand)
+    if text is None:
         return None, body
-    return brand, readable
+    return brand, text
 
 
-def _body_colour(slot: Slot) -> str | None:
-    """Строки без заливки лежат на фоне слайда — и набираются, как основной текст."""
-    return slot.text_style.color if slot.text_style else None
+def _body_colour(slot: Slot, tokens: DesignTokens | None, background: str | None) -> str | None:
+    """Цвет строк: у них нет заливки, и они лежат прямо на фоне слайда.
 
-
-def _contrast(first: str, second: str) -> float:
-    """Отношение контраста по WCAG: (светлее + 0,05) / (темнее + 0,05)."""
-    lighter, darker = sorted((_luminance(first), _luminance(second)), reverse=True)
-    return (lighter + 0.05) / (darker + 0.05)
-
-
-def _luminance(colour: str) -> float:
-    channels = [int(colour[index : index + 2], 16) / 255 for index in (1, 3, 5)]
-    linear = [
-        value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
-        for value in channels
-    ]
-    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+    Берётся цвет, которым шаблон набирает слот, — если он читается на фоне
+    мелким кеглем таблицы. Синий VK на белом даёт 4,13:1: основному тексту
+    крупного кегля этого хватает, таблице — нет, и тогда берётся первый
+    читаемый цвет палитры. Не читается ничего — остаётся цвет слота.
+    """
+    own = slot.text_style.color if slot.text_style else None
+    palette = [token.value for token in tokens.colors] if tokens else []
+    return readable([own, *palette], background) or own

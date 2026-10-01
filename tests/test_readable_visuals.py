@@ -150,6 +150,29 @@ def test_rows_are_set_in_the_body_text_colour() -> None:
     assert table.body_color == "#FFFFFF"
 
 
+def test_rows_switch_to_a_palette_colour_that_reads_on_a_plain_background() -> None:
+    """Синий VK на белом — 4,13:1: для мелкого текста таблицы мало."""
+    table, _ = tables.build(
+        table_spec(), slot(VK_BLUE), tokens(VK_BLUE, "#000000", brand=VK_BLUE), background="#FFFFFF"
+    )
+    assert table.body_color == "#000000"
+
+
+def test_rows_keep_the_slot_colour_when_the_background_is_unknown() -> None:
+    """Под фоном-изображением цвет не вычислить: верим шаблону."""
+    table, _ = tables.build(
+        table_spec(), slot(VK_BLUE), tokens(VK_BLUE, "#000000", brand=VK_BLUE), background=None
+    )
+    assert table.body_color == VK_BLUE
+
+
+def test_rows_keep_the_slot_colour_when_nothing_reads_better() -> None:
+    table, _ = tables.build(
+        table_spec(), slot(VK_BLUE), tokens(VK_BLUE, "#3399FF", brand=VK_BLUE), background="#FFFFFF"
+    )
+    assert table.body_color == VK_BLUE
+
+
 # --- Вёрстка диаграммы ----------------------------------------------------
 
 
@@ -166,6 +189,13 @@ def test_chart_text_is_set_in_the_body_text_colour() -> None:
     """Дефект VK Tech и VK WorkSpace: подписи без цвета — чёрным по чёрному."""
     chart = charts.build(chart_spec(), slot("#FFFFFF"), tokens("#FFFFFF", VK_BLUE, brand=VK_BLUE))
     assert chart.text_color == "#FFFFFF"
+
+
+def test_chart_text_switches_to_a_palette_colour_that_reads_on_a_plain_background() -> None:
+    chart = charts.build(
+        chart_spec(), slot(VK_BLUE), tokens(VK_BLUE, "#000000", brand=VK_BLUE), background="#FFFFFF"
+    )
+    assert chart.text_color == "#000000"
 
 
 # --- Экспорт --------------------------------------------------------------

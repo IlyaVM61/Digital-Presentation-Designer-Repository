@@ -101,7 +101,7 @@ def _compose_slide(
     if body_slot is not None and visual is not None and visual.kind == "chart" and visual.chart:
         style = style_for(body_slot, tokens, size_shift, decisions)
         styled = body_slot.model_copy(update={"text_style": style})
-        chart = build_chart(visual.chart, styled, tokens)
+        chart = build_chart(visual.chart, styled, tokens, _plain_background(layout))
         elements.append(
             _RE(slot_id=body_slot.id, kind="chart", bounds=body_slot.bounds, chart=chart)
         )
@@ -118,7 +118,7 @@ def _compose_slide(
         # слоте наложились бы друг на друга.
         style = style_for(body_slot, tokens, size_shift, decisions)
         styled = body_slot.model_copy(update={"text_style": style})
-        table, applied = build_table(visual.table, styled, tokens)
+        table, applied = build_table(visual.table, styled, tokens, _plain_background(layout))
         elements.append(
             _RE(slot_id=body_slot.id, kind="table", bounds=body_slot.bounds, table=table)
         )
@@ -146,6 +146,12 @@ def _compose_slide(
         elements=elements,
         applied_compensations=compensations,
     )
+
+
+def _plain_background(layout: Layout) -> str | None:
+    """Цвет фона макета, если он известен; под изображением — `None`."""
+    background = layout.background
+    return background.value if background.contrast_computable and background.value else None
 
 
 def _first_slot(layout: Layout, kind: str) -> Slot | None:
