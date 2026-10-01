@@ -14,7 +14,11 @@
 
 from dpd.generation.content_pack import ContentPack, load_content_pack
 from dpd.generation.outline import structure_from_outline
-from dpd.generation.structure import DEFAULT_SLIDE_RANGE, STRUCTURE_STAGE, generate_structure
+from dpd.generation.structure import (
+    DEFAULT_SLIDE_RANGE,
+    STRUCTURE_STAGE,
+    generate_structure,
+)
 
 __all__ = [
     "DEFAULT_SLIDE_RANGE",
