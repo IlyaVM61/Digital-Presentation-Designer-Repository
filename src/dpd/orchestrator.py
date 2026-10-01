@@ -41,6 +41,14 @@ LibreOffice: 16,6 с против 8,8 с на одну и около 26 с тр�
 до вёрстки — там же, где генерация, — а прогон дописывает его находки в отчёт
 каждого варианта: пользователь смотрит на вариант, и замечания к тексту
 должны быть там же, где замечания к вёрстке.
+
+**Аудит визуала — после выбора варианта** (T-52, ADR-0002, п. 4). VLM
+смотрит изображение каждого слайда, и смотреть все три варианта значило бы
+втрое больше запросов при том, что выгружает пользователь один. Прогон
+модель не зовёт: до просмотра отчёт каждого варианта называет проверки
+визуала пропущенными, `look` смотрит выбранный и дописывает находки.
+Исправление по выбору меняет слайды — замечания модели о прежних
+изображениях после него сбрасываются, проверки снова названы пропущенными.
 """
 
 from __future__ import annotations
@@ -58,10 +66,11 @@ from dpd.audit.checks import check_variant_distinction
 from dpd.audit.fixer import repair
 from dpd.audit.remedies import Choice, Remedy, apply_remedies, options
 from dpd.audit.textual import attach
+from dpd.audit.visual import audit_visual
 from dpd.export import export_html, export_pdf, export_pptx
 from dpd.layout import compose_variants
 from dpd.layout.variants import load_profiles
-from dpd.llm import load_prompts
+from dpd.llm import ModelClient, PromptSet, load_prompts
 from dpd.models import (
     AuditReport,
     Finding,
@@ -205,7 +214,7 @@ def run_pipeline(
             variants[index] = result.deck
             # Находки текста дописываются до подбора способов исправления:
             # способы адресуются номером находки в отчёте.
-            reports[deck.variant] = attach(result.report, text_audit, result.deck)
+            reports[deck.variant] = _unseen(attach(result.report, text_audit, result.deck), result.deck)
             remedies[deck.variant] = options(replace(context, deck=result.deck), reports[deck.variant])
         # Различимость меряется после починки: сравниваются колоды, которые
         # пользователь увидит, а не черновики.
@@ -289,7 +298,7 @@ def revise(result: RunResult, variant: str, choices: Mapping[int, str]) -> RunRe
             "prompt_versions": report.prompt_versions,
         }
     )
-    fresh = attach(fresh, result.text_audit, repaired.deck)
+    fresh = _unseen(attach(fresh, result.text_audit, repaired.deck), repaired.deck)
 
     variants = [repaired.deck if item.variant == variant else item for item in result.variants]
     exports, images = _export(
@@ -327,6 +336,49 @@ def revise(result: RunResult, variant: str, choices: Mapping[int, str]) -> RunRe
         ),
         revisions=result.revisions + 1,
     )
+
+
+def look(result: RunResult, variant: str, client: ModelClient, prompts: PromptSet) -> RunResult:
+    """Аудит визуала варианта через VLM (T-52): запрос на слайд, все вопросы разом.
+
+    Изображения берутся из превью прогона, а если их не рисовали — вариант
+    отрисовывается здесь: модели нужен рендер именно этой колоды. Находки
+    дописываются в конец отчёта варианта и номеров прежних не сдвигают —
+    по ним адресованы способы исправления. Время попадает в разбивку отчёта
+    этапом `visual`: он входит в бюджет цикла (`models-strategy.md`), но
+    идёт после выбора, и в разбивке прогона его нет.
+
+    `ModelError` поднимается как есть: отчёт варианта при этом не меняется,
+    и проверки визуала в нём остаются названными пропущенными.
+    """
+    deck = _chosen(result.variants, variant)
+    started = time.perf_counter()
+
+    previews = dict(result.variant_previews)
+    images = previews.get(variant, [])
+    if len(images) != len(deck.slides):
+        if result.template_path is None or result.out_dir is None:
+            raise ValueError("прогон не сохранил своих входов — отрисовать вариант не по чему")
+        _, rendered = _export(
+            [deck], result.template, result.template_path, result.out_dir, (), True, {}, lambda *_: None
+        )
+        images = previews[variant] = rendered[variant]
+
+    visual = audit_visual(deck, images, client, prompts, run_id=result.run_id)
+    report = attach(result.reports[variant], visual, deck)
+    report = report.model_copy(update={"timings": {**report.timings, "visual": time.perf_counter() - started}})
+
+    return replace(
+        result,
+        reports={**result.reports, variant: report},
+        variant_previews=previews,
+        previews=previews.get(result.chosen.variant, []),
+    )
+
+
+def _unseen(report: AuditReport, deck: RenderedPresentation) -> AuditReport:
+    """Отчёт варианта, на который модель не смотрела: проверки визуала названы пропущенными."""
+    return attach(report, audit_visual(deck), deck)
 
 
 def _open(report: AuditReport) -> dict[str, int]:

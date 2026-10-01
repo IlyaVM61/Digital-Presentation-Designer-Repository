@@ -55,6 +55,7 @@ from dpd.models.audit import SEVERITY_ORDER
 
 if TYPE_CHECKING:
     from dpd.audit.textual import TextReview
+    from dpd.audit.visual import VisualReview
     from dpd.generation import ContentPack
 
 CHECKS_PACKAGE = "dpd.audit.checks"
@@ -155,6 +156,10 @@ class AuditContext:
     """Ответ модели на смысловые вопросы о тексте колоды — один запрос на
     колоду, проверки 4a читают из него свою часть (T-51). Без модели его нет,
     и смысловые проверки пропускаются."""
+    visual_review: VisualReview | None = None
+    """Ответы VLM по изображению каждого слайда варианта — один запрос на
+    слайд, проверки 4c читают из них свою часть (T-52). Без модели их нет, и
+    проверки визуала пропускаются."""
 
     def available(self) -> dict[str, Any]:
         """Входы, которыми контекст располагает сейчас."""

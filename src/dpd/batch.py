@@ -26,6 +26,14 @@
 проверке колоды не останавливает: смысловые проверки названы в отчётах
 пропущенными, а детерминированные выполнены.
 
+**Вид слайдов смотрит VLM — у всех девяти колод** (T-52). В интерфейсе
+модель смотрит только выбранный вариант, а колоды сдачи — все три варианта
+сразу, выбора между ними нет: батч и есть «полный прогон по явному
+требованию» ADR-0002. Запрос на слайд, около сорока на шаблон. Сбой модели
+колоду не останавливает: проверки визуала остаются в отчёте пропущенными.
+План, написанный человеком (`--outline`), собирается без моделей и без
+этой проверки.
+
 **Сбой одного шаблона не останавливает остальные.** Он виден по коду
 возврата и по сводке, но колоды соседних шаблонов собираются: девять колод
 не должны зависеть от самого слабого файла.
@@ -61,7 +69,7 @@ from dpd.llm import (
     load_settings,
 )
 from dpd.models import AuditReport, Finding, PresentationStructure
-from dpd.orchestrator import run_pipeline
+from dpd.orchestrator import RunResult, look, run_pipeline
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MATRIX = ROOT / "configs" / "decks.yaml"
@@ -83,6 +91,9 @@ class Built:
     error: str | None = None
 
 
+VISUAL_CHECKS = ("content.irrelevant_imagery", "content.visual_readability")
+
+
 def load_matrix(path: str | Path = DEFAULT_MATRIX) -> list[tuple[str, Path]]:
     """Шаблоны сдачи в порядке конфига: слаг и путь к файлу."""
     config = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
@@ -93,6 +104,11 @@ def load_matrix(path: str | Path = DEFAULT_MATRIX) -> list[tuple[str, Path]]:
 def model_client(prompts: PromptSet) -> ModelClient:
     """Клиент LLM по `configs/models.yaml` и `.env`."""
     return build_client(load_settings("llm"), prompts)
+
+
+def vision_client(prompts: PromptSet) -> ModelClient:
+    """Клиент VLM по `configs/models.yaml` и `.env` — для аудита визуала."""
+    return build_client(load_settings("vlm"), prompts)
 
 
 def generate_from_pack(directory: Path) -> tuple[PresentationStructure, AuditReport]:
@@ -129,6 +145,24 @@ def check_text(
     return report
 
 
+def check_visual(result: RunResult, client: ModelClient, prompts: PromptSet) -> RunResult:
+    """Аудит визуала каждого варианта (T-52): у колод сдачи выбора нет."""
+    for deck in result.variants:
+        started = time.perf_counter()
+        try:
+            result = look(result, deck.variant, client, prompts)
+        except ModelError as error:
+            print(f"Вариант {deck.variant}: вид слайдов не проверен, в отчёте проверки названы пропущенными: {error}", flush=True)
+            continue
+        found = [item for item in result.reports[deck.variant].findings if item.check_id in VISUAL_CHECKS]
+        print(
+            f"Вариант {deck.variant}: вид {len(deck.slides)} слайдов проверен за {time.perf_counter() - started:.1f} с, "
+            f"замечаний {len(found)}",
+            flush=True,
+        )
+    return result
+
+
 def deck_name(slug: str, variant: str) -> str:
     """Имя колоды по схеме сдачи: `vk-tech__a`."""
     return f"{slug}__{variant.lower()}"
@@ -141,8 +175,13 @@ def build_decks(
     *,
     formats: Sequence[str] = FORMATS,
     text_audit: AuditReport | None = None,
+    vision: tuple[ModelClient, PromptSet] | None = None,
 ) -> list[Built]:
-    """Собрать все варианты каждого шаблона и разложить их по схеме сдачи."""
+    """Собрать все варианты каждого шаблона и разложить их по схеме сдачи.
+
+    `vision` — клиент VLM и промпты: с ними вид слайдов каждой колоды
+    проверяет модель (T-52).
+    """
     decks_dir, audit_dir = out_root / "decks", out_root / "audit"
     decks_dir.mkdir(parents=True, exist_ok=True)
     audit_dir.mkdir(parents=True, exist_ok=True)
@@ -156,7 +195,11 @@ def build_decks(
         # диска не копирует файлы, а системный диск не тратится.
         with tempfile.TemporaryDirectory(dir=out_root, prefix=".work-", ignore_cleanup_errors=True) as work:
             try:
-                result = run_pipeline(template, structure, work, formats=formats, text_audit=text_audit)
+                result = run_pipeline(
+                    template, structure, work, formats=formats, text_audit=text_audit, previews=vision is not None
+                )
+                if vision is not None:
+                    result = check_visual(result, *vision)
             except Exception as error:  # noqa: BLE001 — сбой шаблона идёт в сводку, а не роняет батч
                 built.error = f"{type(error).__name__}: {error}"
             else:
@@ -232,6 +275,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if missing:
         parser.error("нет файлов шаблонов: " + "; ".join(missing))
 
+    vision = None
     if args.outline is not None:
         structure = structure_from_outline(args.outline.read_text(encoding="utf-8"))
         text = check_text(structure)
@@ -241,9 +285,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         except ModelError as error:
             print(f"Колода не сгенерирована: {error}", flush=True)
             return 1
+        prompts = load_prompts()
+        vision = (vision_client(prompts), prompts)
 
     started = time.perf_counter()
-    results = build_decks(matrix, structure, args.out, formats=args.formats, text_audit=text)
+    results = build_decks(matrix, structure, args.out, formats=args.formats, text_audit=text, vision=vision)
     failed = [built.slug for built in results if built.error]
     total = sum(len(built.decks) for built in results)
     print(f"Итого: {total} колод за {time.perf_counter() - started:.1f} с → {args.out}", flush=True)

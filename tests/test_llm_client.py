@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 
@@ -317,6 +318,33 @@ def test_answer_without_choices_is_retried() -> None:
     provider = Provider(broken, answer(VALID))
 
     assert ask(client(provider)).item_count == 3
+
+# --- изображение в запросе (T-52) ------------------------------------------
+
+
+def test_image_goes_into_the_user_message_next_to_the_text() -> None:
+    """Аудит визуала показывает модели слайд: изображение идёт в сообщении
+    пользователя частью `image_url`, как принято в OpenAI-совместимом API."""
+    provider = Provider(answer(VALID))
+
+    client(provider).complete("системный", "запрос", Headline, stage="Вид слайдов", images=[b"\x89PNG-1"])
+
+    system, user = provider.body(0)["messages"]
+    assert system == {"role": "system", "content": "системный"}
+    assert user["role"] == "user"
+    assert user["content"] == [
+        {"type": "text", "text": "запрос"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(b"\x89PNG-1").decode()}},
+    ]
+
+
+def test_retry_shows_the_image_again() -> None:
+    """Повтор без изображения просил бы модель исправить ответ о слайде, которого она не видит."""
+    provider = Provider(answer('{"title": "Выручка'), answer(VALID))
+
+    client(provider).complete("системный", "запрос", Headline, stage="Вид слайдов", images=[b"png"])
+
+    assert provider.body(1)["messages"][:2] == provider.body(0)["messages"]
 
 
 # --- настройки -------------------------------------------------------------

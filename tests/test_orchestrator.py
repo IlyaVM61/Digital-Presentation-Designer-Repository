@@ -474,3 +474,147 @@ def test_text_audit_reaches_every_variant_and_survives_revision(template: Path, 
 
     [moved] = [f for f in revised.reports[variant].findings if f.check_id == "content.typos"]
     assert moved.slide_number == len(structure.slides) + 1
+
+
+# --- Аудит визуала выбранного варианта (T-52) --------------------------------
+
+VISUAL = ("content.irrelevant_imagery", "content.visual_readability")
+
+
+def fake_render(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    """LibreOffice подменён: проверяется, кто и что смотрит, а не конвертация.
+
+    Превью по одному на слайд — их число берётся из колоды, лежащей рядом с
+    «PDF», как у настоящего рендера.
+    """
+    from pptx import Presentation
+
+    from dpd import orchestrator
+
+    converted: list[Path] = []
+
+    def convert(paths, out, **_):
+        converted.extend(Path(path) for path in paths)
+        return [Path(path).with_suffix(".pdf") for path in paths]
+
+    def render(pdf, out, **_):
+        out = Path(out)
+        out.mkdir(parents=True, exist_ok=True)
+        count = len(Presentation(str(Path(pdf).with_suffix(".pptx"))).slides)
+        images = [out / f"slide-{number:03d}.png" for number in range(1, count + 1)]
+        for image in images:
+            image.write_bytes(b"png")
+        return images
+
+    monkeypatch.setattr(orchestrator, "convert_to_pdfs", convert)
+    monkeypatch.setattr(orchestrator, "render_pdf_pages", render)
+    return converted
+
+
+def vision(requests: list[dict]):
+    """VLM-подделка: на каждом слайде шапку не видно."""
+    import json
+
+    import httpx
+
+    from dpd.llm import ModelClient, ModelSettings, load_prompts
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        content = {"readability": [{"element": 1, "problem": "Заголовок сливается с фоном"}], "offTopicPictures": []}
+        message = {"role": "assistant", "content": json.dumps(content, ensure_ascii=False)}
+        return httpx.Response(200, json={"choices": [{"message": message, "finish_reason": "stop"}]})
+
+    settings = ModelSettings(
+        base_url="https://provider.test/v1",
+        api_key="test",
+        model="test-vlm",
+        temperature=0,
+        seed=1,
+        max_tokens=100,
+        timeout_sec=5,
+        max_attempts=1,
+        retry_delay_sec=0,
+    )
+    prompts = load_prompts()
+    return ModelClient(settings, repair_prompt=prompts.get("skills/response-repair").text, transport=httpx.MockTransport(reply)), prompts
+
+
+def test_visual_checks_are_named_skipped_until_a_variant_is_looked_at(template: Path, out_dir: Path) -> None:
+    """Прогон модели не зовёт: смотрится выбранный вариант, а выбирают после
+    прогона. До этого отчёт называет проверки визуала пропущенными, а не молчит."""
+    result = run_pipeline(template, structure_from_outline(OUTLINE), out_dir / "visual-skipped", formats=("html",))
+
+    for report in result.reports.values():
+        assert set(VISUAL) <= set(report.checks_skipped)
+        assert not set(VISUAL) & set(report.checks_run)
+
+
+def test_look_audits_the_chosen_variant_only(
+    template: Path, out_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Критерий T-52: один запрос на слайд, все вопросы разом — и только для
+    выбранного варианта (ADR-0002, п. 4). Превью прогона переиспользуются:
+    второй запуск LibreOffice ради того же изображения не нужен."""
+    from dpd.orchestrator import look
+
+    converted = fake_render(monkeypatch)
+    result = run_pipeline(
+        template, structure_from_outline(OUTLINE), out_dir / "visual-look", formats=("pptx",), previews=True
+    )
+    launches = len(converted)
+    requests: list[dict] = []
+    variant = result.variants[1].variant
+    deck = next(item for item in result.variants if item.variant == variant)
+
+    looked = look(result, variant, *vision(requests))
+
+    assert len(requests) == len(deck.slides)
+    assert len(converted) == launches
+    report = looked.reports[variant]
+    assert set(VISUAL) <= set(report.checks_run)
+    assert [f.slide_number for f in report.findings if f.check_id == "content.visual_readability"] == list(
+        range(1, len(deck.slides) + 1)
+    )
+    assert "visual" in report.timings
+    for other, unseen in looked.reports.items():
+        if other != variant:
+            assert set(VISUAL) <= set(unseen.checks_skipped)
+
+
+def test_look_renders_the_variant_when_the_run_had_no_previews(
+    template: Path, out_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dpd.orchestrator import look
+
+    converted = fake_render(monkeypatch)
+    result = run_pipeline(template, structure_from_outline(OUTLINE), out_dir / "visual-render", formats=("html",))
+    assert converted == []
+    requests: list[dict] = []
+    variant = result.chosen.variant
+
+    looked = look(result, variant, *vision(requests))
+
+    assert len(converted) == 1
+    assert len(looked.variant_previews[variant]) == len(looked.chosen.slides) == len(requests)
+
+
+def test_revision_drops_what_the_model_saw_before_it(
+    template: Path, out_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """После исправления слайды другие, а модель смотрела на прежние: её
+    замечания не переносятся, проверки снова названы пропущенными."""
+    from dpd.orchestrator import look, revise
+
+    fake_render(monkeypatch)
+    result = run_pipeline(template, structure_from_outline(CROWDED), out_dir / "visual-revise", formats=("html",))
+    variant = result.variants[0].variant
+    looked = look(result, variant, *vision([]))
+    report = looked.reports[variant]
+    index = next(i for i, f in enumerate(report.findings) if f.check_id == "density.too_many_bullets")
+
+    revised = revise(looked, variant, {index: "split"})
+
+    fresh = revised.reports[variant]
+    assert not [f for f in fresh.findings if f.check_id in VISUAL]
+    assert set(VISUAL) <= set(fresh.checks_skipped)

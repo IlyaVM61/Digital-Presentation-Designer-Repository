@@ -241,7 +241,9 @@ def fake_model(request: httpx.Request) -> httpx.Response:
     числа, а ссылка ведёт на настоящий раздел `assets/content-pack/content.md`.
     """
     body = json.loads(request.content)
-    if body["response_format"]["json_schema"]["name"] == "TextReview":
+    if body["response_format"]["json_schema"]["name"] == "SlideLook":
+        content = {"readability": [], "offTopicPictures": []}
+    elif body["response_format"]["json_schema"]["name"] == "TextReview":
         job = json.loads(body["messages"][1]["content"].rsplit("\n\n", 1)[1])
         ok = {"ok": True, "reason": ""}
         verdicts = ("bodySupportsHeadline", "oneSentence", "followsPrevious")
@@ -288,6 +290,14 @@ def test_decks_are_built_from_the_content_pack_without_a_human_outline(monkeypat
         return build_client(SETTINGS, prompts, transport=httpx.MockTransport(fake_model))
 
     monkeypatch.setattr(batch, "model_client", mocked)
+    looked: list[int] = []
+
+    def vision(prompts: PromptSet) -> ModelClient:
+        looked.append(1)
+        return build_client(SETTINGS, prompts, transport=httpx.MockTransport(fake_model))
+
+    monkeypatch.setattr(batch, "vision_client", vision)
+    fake_render(monkeypatch)
     out = _fresh("pack")
 
     # Контент-пакет — вход по умолчанию: плана, написанного человеком, нет.
@@ -300,4 +310,29 @@ def test_decks_are_built_from_the_content_pack_without_a_human_outline(monkeypat
     # Аудит текста выполнен один раз до вёрстки и вошёл в отчёт колоды (T-51).
     report = json.loads((out / "audit" / "vk-tech__a.report.json").read_text(encoding="utf-8"))
     assert "content.headline_no_conclusion" in report["checksRun"]
-    assert not [item for item in report["checksSkipped"] if item.startswith("content.")]
+    # Колоды сдачи — все три варианта, выбора нет: VLM смотрит каждую (T-52).
+    assert looked == [1]
+    for variant in ("a", "b", "c"):
+        report = json.loads((out / "audit" / f"vk-tech__{variant}.report.json").read_text(encoding="utf-8"))
+        assert {"content.irrelevant_imagery", "content.visual_readability"} <= set(report["checksRun"])
+        assert not [item for item in report["checksSkipped"] if item.startswith("content.")]
+
+
+def fake_render(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LibreOffice подменён: превью по одному на слайд колоды."""
+    from pptx import Presentation
+
+    from dpd import orchestrator
+
+    def render(pdf, out, **_):
+        Path(out).mkdir(parents=True, exist_ok=True)
+        count = len(Presentation(str(Path(pdf).with_suffix(".pptx"))).slides)
+        images = [Path(out) / f"slide-{number:03d}.png" for number in range(1, count + 1)]
+        for image in images:
+            image.write_bytes(b"png")
+        return images
+
+    monkeypatch.setattr(
+        orchestrator, "convert_to_pdfs", lambda paths, out, **_: [Path(path).with_suffix(".pdf") for path in paths]
+    )
+    monkeypatch.setattr(orchestrator, "render_pdf_pages", render)

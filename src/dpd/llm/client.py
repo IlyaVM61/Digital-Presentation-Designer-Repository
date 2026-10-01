@@ -19,13 +19,19 @@ Qwen3 кладёт текст туда (MODELS.md). Вокруг JSON модел
 
 Текст просьбы исправить ответ — промпт, а промптам в коде не место (ТЗ,
 п. 2.4): клиент получает его снаружи, из `prompts/`.
+
+**Изображение идёт в сообщении пользователя** (T-52): аудит визуала
+показывает модели слайд частью `image_url` с PNG в `data:`-адресе — так его
+принимает OpenAI-совместимый API. Повтор показывает изображение снова:
+исправлять ответ о слайде, которого не видно, модели не по чему.
 """
 
 from __future__ import annotations
 
+import base64
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TypeVar
 
 import httpx
@@ -71,9 +77,20 @@ class ModelClient:
         self.transport = transport
         self.sleep = sleep
 
-    def complete(self, system: str, user: str, schema: type[T], *, stage: str) -> T:
-        """Ответ модели как объект контракта `schema` — или `ModelError`."""
-        base = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    def complete(
+        self,
+        system: str,
+        user: str,
+        schema: type[T],
+        *,
+        stage: str,
+        images: Sequence[bytes] = (),
+    ) -> T:
+        """Ответ модели как объект контракта `schema` — или `ModelError`.
+
+        `images` — PNG, которые модель видит вместе с запросом (роль `vlm`).
+        """
+        base = [{"role": "system", "content": system}, {"role": "user", "content": _with_images(user, images)}]
         messages = base
         attempts = self.settings.max_attempts
         reason = ""
@@ -113,7 +130,7 @@ class ModelClient:
     def _send(
         self,
         http: httpx.Client,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, object]],
         schema: type[BaseModel],
         stage: str,
         attempt: int,
@@ -168,6 +185,19 @@ class ModelClient:
         text = message.get("content") or message.get("reasoning") or ""
         return text, choice.get("finish_reason")
 
+
+
+def _with_images(text: str, images: Sequence[bytes]) -> str | list[dict[str, object]]:
+    """Содержимое сообщения пользователя: строка, а с изображениями — части."""
+    if not images:
+        return text
+    return [
+        {"type": "text", "text": text},
+        *(
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(image).decode()}}
+            for image in images
+        ),
+    ]
 
 
 def build_client(
