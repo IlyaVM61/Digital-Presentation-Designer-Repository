@@ -70,30 +70,26 @@ def select(
     needs_visual = slide.visualization is not None
     needs_content = bool(slide.body and slide.body.items) or needs_visual
 
-    exact = _ranked(layouts, wanted, needs_content, needs_visual)
-    if exact:
-        chosen = exact[offset % len(exact)]
-        return chosen, LayoutDecision(
-            requested_family=wanted,
-            chosen_family=chosen.family,
-            layout_id=chosen.id,
-            degraded=False,
-            reason="макет нужного типа найден",
-        )
-
-    for candidate in FALLBACK_ORDER.get(wanted, ()):
-        available = _ranked(layouts, candidate, needs_content, needs_visual)
-        if available:
+    # Слайду с содержимым макет, куда его некуда положить, не годится, даже
+    # если тип совпал: прогон T-43 потерял так тело десяти слайдов из
+    # двенадцати. Поэтому сначала вся цепочка типов проходится по пригодным
+    # макетам, и только затем — по любым.
+    families = (wanted, *FALLBACK_ORDER.get(wanted, ()))
+    for strict in (True, False) if needs_content else (False,):
+        for candidate in families:
+            available = _ranked(layouts, candidate, needs_content, needs_visual)
+            if strict:
+                available = [layout for layout in available if _has_content_slot(layout)]
+            if not available:
+                continue
             chosen = available[offset % len(available)]
+            degraded = candidate != wanted
             return chosen, LayoutDecision(
                 requested_family=wanted,
                 chosen_family=chosen.family,
                 layout_id=chosen.id,
-                degraded=True,
-                reason=(
-                    f"в шаблоне нет макета типа «{wanted}»; "
-                    f"выбран ближайший — «{candidate}»"
-                ),
+                degraded=degraded,
+                reason=_reason(layouts, wanted, candidate) if degraded else "макет нужного типа найден",
             )
 
     # Тип не нашёлся вовсе: берём любой, где есть место под содержимое.
@@ -149,13 +145,20 @@ def _ranked(
     return suitable + [layout for layout in candidates if layout not in suitable]
 
 
+def _reason(layouts: list[Layout], wanted: LayoutFamily, candidate: LayoutFamily) -> str:
+    if any(layout.family == wanted for layout in layouts):
+        return f"у макетов типа «{wanted}» нет места под содержимое; выбран ближайший — «{candidate}»"
+    return f"в шаблоне нет макета типа «{wanted}»; выбран ближайший — «{candidate}»"
+
+
 def _has_content_slot(layout: Layout) -> bool:
-    return any(slot.kind != "title" for slot in layout.slots)
+    """Есть ли место под содержимое. Номер слайда и колонтитулы — не оно."""
+    return any(slot.kind == "body" for slot in layout.slots)
 
 
 def _content_area(layout: Layout) -> float:
     """Площадь самого просторного места под содержимое, в долях холста."""
     areas = [
-        slot.bounds.w * slot.bounds.h for slot in layout.slots if slot.kind != "title"
+        slot.bounds.w * slot.bounds.h for slot in layout.slots if slot.kind == "body"
     ]
     return max(areas, default=0.0)

@@ -8,7 +8,7 @@
 Порядок источников отражает убывающую надёжность:
 
 1. `placeholder` — плейсхолдер макета, высокая надёжность;
-2. `shape` — обычная фигура с текстовой рамкой, средняя;
+2. `shape` — обычная фигура, предназначенная для текста, средняя;
 3. `derived` — область, сконструированная в свободном месте, низкая.
 
 Третий уровень понадобился по измерению: в VK WorkSpace текстовых рамок
@@ -64,15 +64,15 @@ def shape_slots(
 ) -> list[Slot]:
     """Слоты, выведенные из обычных фигур макета.
 
-    Берутся фигуры с текстовой рамкой: рамка — заявление автора шаблона о
-    том, что здесь предполагается текст. Плейсхолдеры пропускаются, они уже
-    разобраны и надёжнее.
+    Берутся фигуры, предназначенные для текста (`_meant_for_text`): это
+    заявление автора шаблона о том, что здесь предполагается текст.
+    Плейсхолдеры пропускаются, они уже разобраны и надёжнее.
     """
     occupied = [slot.bounds for slot in taken]
     slots: list[Slot] = []
 
     for shape in _walk(layout.shapes):
-        if _is_placeholder(shape) or not shape.has_text_frame:
+        if _is_placeholder(shape) or not _meant_for_text(shape):
             continue
         bounds = _bounds_of(shape, canvas)
         if bounds is None or not _is_plausible_slot(bounds):
@@ -102,10 +102,17 @@ def obstacles(layout, canvas: Canvas) -> list[Bounds]:
     логотипа «VK WorkSpace» в нижней части слайда — дефект, который в схеме
     не виден, а на рендере бросается в глаза.
 
+    Фигуры мастера тоже препятствия, если макет их показывает: на слайде они
+    видны так же, как свои. Без этого слот на макете из одного заголовка
+    ложился поверх декоративной полосы мастера (найдено прогоном T-43).
+
     Фон (почти весь холст) препятствием не считается: обходить его некуда.
     """
+    shapes = list(_walk(layout.shapes))
+    if _shows_master_shapes(layout):
+        shapes += _walk(layout.slide_master.shapes)
     found: list[Bounds] = []
-    for shape in _walk(layout.shapes):
+    for shape in shapes:
         if _is_placeholder(shape):
             continue
         bounds = _bounds_of(shape, canvas)
@@ -230,6 +237,26 @@ def _walk(shapes):
     размечено, надёжнее сконструировать (`origin="derived"`).
     """
     yield from shapes
+
+
+def _meant_for_text(shape) -> bool:
+    """Фигура предназначена для текста: это надпись или в ней уже есть текст.
+
+    Текстовой рамки самой по себе мало: в python-pptx она есть у любой
+    автофигуры, включая пустой декоративный параллелограмм. Пустой декор,
+    принятый за слоты, делал макет «разделённым», вёрстка его не выбирала, и
+    колода прогона T-43 осталась из одних заголовков.
+    """
+    if not shape.has_text_frame:
+        return False
+    if shape.text_frame.text.strip():
+        return True
+    return shape._element.xpath("./p:nvSpPr/p:cNvSpPr/@txBox") in (["1"], ["true"])
+
+
+def _shows_master_shapes(layout) -> bool:
+    """Видны ли на макете фигуры мастера: атрибут `showMasterSp`, по умолчанию да."""
+    return layout._element.get("showMasterSp") not in ("0", "false")
 
 
 def _is_placeholder(shape) -> bool:

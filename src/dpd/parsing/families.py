@@ -29,14 +29,20 @@ def classify(slots) -> LayoutFamily:
     if not slots:
         return "blank"
 
-    content = [slot for slot in slots if slot.kind != "title"]
+    # Место под содержимое — только слот тела. Номер слайда и колонтитулы
+    # делали макет из одного заголовка контентным (найдено прогоном T-43).
+    content = [slot for slot in slots if slot.kind == "body"]
+    title = next((slot for slot in slots if slot.kind == "title"), None)
+    # Без слота заголовка заголовок слайда пропадает: такой макет — последний
+    # запасной, а не рабочий (найдено прогоном T-43).
+    if title is None:
+        return "blank"
     if not content:
         return "section"
     if len(content) >= 2:
         return "split"
 
-    title = next((slot for slot in slots if slot.kind == "title"), None)
-    if title is not None and title.bounds.y >= TITLE_BAND:
+    if title.bounds.y >= TITLE_BAND:
         return "title"
     return "content"
 

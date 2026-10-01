@@ -41,7 +41,7 @@ from dpd.parsing.slots import (
 from dpd.parsing.tokens import extract_design_tokens
 from dpd.parsing.variants import colour_scheme, group
 
-PARSER_VERSION = "0.1.0"
+PARSER_VERSION = "0.2.0"
 
 _TITLE_PLACEHOLDERS = {PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE}
 _BODY_PLACEHOLDERS = {PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.SUBTITLE, PP_PLACEHOLDER.OBJECT}
@@ -132,8 +132,9 @@ def _parse_layout(layout, master_number: int, canvas: Canvas, resolver: StyleRes
     slots.extend(shape_slots(layout, canvas, slots, counters, resolver))
 
     # Если места под содержимое так и не нашлось, оно конструируется: иначе
-    # вёрстка соберёт слайд из одного заголовка.
-    if not any(slot.kind != "title" for slot in slots):
+    # вёрстка соберёт слайд из одного заголовка. Номер слайда и колонтитулы
+    # (`other`) местом под содержимое не считаются (найдено прогоном T-43).
+    if not any(slot.kind == "body" for slot in slots):
         constructed = derived_slot(
             canvas,
             slots,
