@@ -244,11 +244,11 @@ def fake_model(request: httpx.Request) -> httpx.Response:
     if body["response_format"]["json_schema"]["name"] == "TextReview":
         job = json.loads(body["messages"][1]["content"].rsplit("\n\n", 1)[1])
         ok = {"ok": True, "reason": ""}
-        verdicts = ("headlineIsConclusion", "bodySupportsHeadline", "oneSentence", "followsPrevious")
+        verdicts = ("bodySupportsHeadline", "oneSentence", "followsPrevious")
         lists = ("unsupportedClaims", "serviceText", "typos", "offPointItems")
         content = {
             "slides": [
-                {"id": item["id"], **dict.fromkeys(verdicts, ok), **{name: [] for name in lists}}
+                {"id": item["id"], "headlineKind": "claim", **dict.fromkeys(verdicts, ok), **{name: [] for name in lists}}
                 for item in job["slides"]
             ]
         }

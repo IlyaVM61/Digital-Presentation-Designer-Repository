@@ -124,7 +124,7 @@ def fine(structure: PresentationStructure) -> dict:
         "slides": [
             {
                 "id": item.id,
-                "headlineIsConclusion": ok,
+                "headlineKind": "service" if item.role == "title" else "claim",
                 "bodySupportsHeadline": ok,
                 "oneSentence": ok,
                 "unsupportedClaims": [],
@@ -216,6 +216,18 @@ def test_key_message_is_not_on_the_slide_and_is_not_checked() -> None:
     assert check_unsourced_numbers(structure, PACK) == []
 
 
+def test_number_found_by_search_is_not_repeated_as_a_claim() -> None:
+    """Живой прогон: модель повторила строку с выдуманным числом как
+    «утверждение без источника», хотя числа ей проверять не велено. Одна и та
+    же строка не предъявляется дважды — остаётся воспроизводимая находка."""
+    structure = deck(slide(1, body=bullets("Удовлетворённость наставников — 97%"), source_refs=[RESULTS]))
+    review = review_of(structure, with_remarks(structure, "s1", unsupportedClaims=["Удовлетворённость наставников — 97%"]))
+
+    findings = check_unsourced_numbers(structure, PACK, review=review)
+
+    assert [f.check_class for f in findings] == ["file"]
+
+
 def test_claims_without_numbers_come_from_the_model() -> None:
     structure = sample()
     review = review_of(structure, with_remarks(structure, "s2", unsupportedClaims=["Было 78%, стало 89%"]))
@@ -276,19 +288,22 @@ def test_product_names_inside_a_phrase_are_not_another_language() -> None:
 # --- Смысловые вопросы: ответ модели становится находками -------------------------
 
 
-def test_headline_naming_a_topic_is_reported_with_the_reason() -> None:
+def test_headline_naming_a_topic_is_reported() -> None:
+    """Модель классифицирует заголовок, а не отвечает «да/нет»: живой прогон
+    показал, что в вопросе «заголовок — вывод?» она путает, что значит
+    `ok: false`. Текст замечания пишет программа."""
     structure = sample()
-    review = review_of(structure, with_remarks(structure, "s3", headlineIsConclusion=bad("Называет тему, а не вывод")))
+    review = review_of(structure, with_remarks(structure, "s3", headlineKind="topic"))
 
     [finding] = check_headline_no_conclusion(structure, review)
 
     assert (finding.check_class, finding.severity, finding.slide_number) == ("model", "advice", 3)
-    assert "Называет тему, а не вывод" in finding.message
+    assert "«Программа растёт каждый квартал»" in finding.message
 
 
 def test_service_slides_need_no_conclusion_in_the_headline() -> None:
     structure = sample()
-    review = review_of(structure, with_remarks(structure, "s1", headlineIsConclusion=bad("Нет вывода")))
+    review = review_of(structure, with_remarks(structure, "s1", headlineKind="topic"))
 
     assert check_headline_no_conclusion(structure, review) == []
 
@@ -441,7 +456,7 @@ def test_without_a_model_the_text_checks_are_named_skipped() -> None:
 
 def test_with_a_model_every_text_check_runs() -> None:
     structure = sample()
-    answer = with_remarks(structure, "s3", headlineIsConclusion=bad("Называет тему"))
+    answer = with_remarks(structure, "s3", headlineKind="topic")
 
     report = audit_text(structure, PACK, client(Provider(answer)), load_prompts())
 

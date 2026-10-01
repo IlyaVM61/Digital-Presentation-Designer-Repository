@@ -33,7 +33,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from dpd.audit.registry import CheckSpec, check, param
-from dpd.audit.textual import visible_texts
+from dpd.audit.textual import plain, visible_texts
 from dpd.generation import ContentPack, fact_sections
 from dpd.generation.content import NUMBER, canonical, fact_numbers
 from dpd.generation.content_pack import BRIEF_FILE
@@ -90,17 +90,19 @@ SERVICE_ROLES = frozenset({"title", "cover", "agenda", "section", "divider", "cl
 def check_headline_no_conclusion(structure: PresentationStructure, review: TextReview) -> list[Finding]:
     """Вопрос 1: заголовок содержит вывод, а не называет тему.
 
-    Служебные роли исключаются здесь, а не только в промпте: правило
-    детерминированное, и полагаться в нём на модель незачем.
+    Модель называет вид заголовка, текст замечания пишет программа. Служебные
+    роли исключаются здесь, а не только в промпте: правило детерминированное,
+    и полагаться в нём на модель незачем.
     """
-    return _verdicts(
-        structure,
-        review,
-        HEADLINE_NO_CONCLUSION,
-        lambda answer: answer.headline_is_conclusion,
-        "Заголовок не формулирует вывод",
-        skip=lambda slide, _: slide.role in SERVICE_ROLES,
-    )
+    return [
+        HEADLINE_NO_CONCLUSION.finding(
+            f"Заголовок «{slide.headline}» называет тему, а не вывод: из него не видно, что доказывает слайд.",
+            slide_number=number,
+            evidence={"slideId": slide.id, "headline": slide.headline},
+        )
+        for number, slide, answer in _answered(structure, review)
+        if answer.headline_kind == "topic" and slide.role not in SERVICE_ROLES
+    ]
 
 
 @check(BODY_MISMATCH_HEADLINE)
@@ -228,6 +230,10 @@ def check_unsourced_numbers(
                     )
 
     if review is not None:
+        # Строка, уже отмеченная сверкой чисел, второй раз не предъявляется:
+        # остаётся воспроизводимая находка. Модель повторяла её как
+        # «утверждение», хотя числа ей проверять не велено.
+        flagged = {(finding.slide_number, plain(finding.evidence["text"])) for finding in findings}
         findings += [
             UNSOURCED_NUMBERS.finding(
                 f"Утверждения нет в исходных материалах: «{claim}».",
@@ -237,6 +243,7 @@ def check_unsourced_numbers(
             )
             for number, slide, answer in _answered(structure, review)
             for claim in answer.unsupported_claims
+            if not any(at == number and plain(claim) in text for at, text in flagged)
         ]
     return findings
 

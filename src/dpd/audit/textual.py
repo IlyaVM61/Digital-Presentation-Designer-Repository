@@ -65,10 +65,15 @@ class Typo(Contract):
 
 
 class SlideReview(Contract):
-    """Ответы о слайде: вопросы 1, 2, 3, 4, 7, 8, 10 и 11 Приложения 1."""
+    """Ответы о слайде: вопросы 1, 2, 3, 4, 7, 8, 10 и 11 Приложения 1.
+
+    Вопрос 1 задан классификацией, а не «да/нет»: живой прогон показал, что
+    в вопросе «заголовок — вывод?» модель путает, что значит `ok: false`, и
+    пишет причину, противоречащую ответу. Назвать вид заголовка ей проще.
+    """
 
     id: str
-    headline_is_conclusion: Verdict
+    headline_kind: Literal["claim", "topic", "service"]
     body_supports_headline: Verdict
     one_sentence: Verdict
     unsupported_claims: list[str]
