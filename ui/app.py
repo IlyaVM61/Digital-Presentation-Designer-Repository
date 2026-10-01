@@ -57,7 +57,16 @@ from dpd.generation import ContentPack, structure_from_outline
 from dpd.llm import build_client, load_prompts, load_settings
 from dpd.models import AuditReport, Finding
 from dpd.models.audit import SEVERITY_ORDER
-from dpd.orchestrator import DRAFT_TITLES, STAGE_TITLES, Revision, RunResult, draft, look, revise, run_pipeline
+from dpd.orchestrator import (
+    DRAFT_TITLES,
+    STAGE_TITLES,
+    Revision,
+    RunResult,
+    draft,
+    look,
+    revise,
+    run_pipeline,
+)
 from dpd.render import soffice_path
 
 FORMATS = [("pptx", "PowerPoint (.pptx)"), ("pdf", "PDF (.pdf)"), ("html", "HTML (.html)")]
