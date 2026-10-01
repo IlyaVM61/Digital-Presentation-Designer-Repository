@@ -31,6 +31,11 @@ LibreOffice: 16,6 с против 8,8 с на одну и около 26 с тр�
 выполняет аудит заново и перевыгружает файлы одного варианта — второй прогон
 всех трёх ради одного слайда не нужен. Исправление, которого нет в скачанном
 файле, пользователю ничего не дало бы.
+
+**Промпты читаются на старте прогона** (T-48), и их версии попадают в отчёт
+каждого варианта: какими промптами получен результат, иначе не узнать (ТЗ,
+п. 2.4). Битый файл промпта останавливает прогон до разбора шаблона, а не
+посреди генерации.
 """
 
 from __future__ import annotations
@@ -50,6 +55,7 @@ from dpd.audit.remedies import Choice, Remedy, apply_remedies, options
 from dpd.export import export_html, export_pdf, export_pptx
 from dpd.layout import compose_variants
 from dpd.layout.variants import load_profiles
+from dpd.llm import load_prompts
 from dpd.models import (
     AuditReport,
     Finding,
@@ -157,6 +163,7 @@ def run_pipeline(
     template_path, out_dir = Path(template_path), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     discover()
+    prompt_versions = load_prompts().versions()
 
     run_id = uuid.uuid4().hex[:8]
     timings: dict[str, float] = {}
@@ -205,7 +212,10 @@ def run_pipeline(
     # когда интерфейс закрыт. Этапы общие для трёх вариантов — разбор один,
     # конвертация одна, — и делить время между вариантами значило бы его
     # выдумывать; каждый отчёт несёт разбивку прогона целиком.
-    reports = {key: report.model_copy(update={"timings": dict(timings)}) for key, report in reports.items()}
+    reports = {
+        key: report.model_copy(update={"timings": dict(timings), "prompt_versions": dict(prompt_versions)})
+        for key, report in reports.items()
+    }
 
     return RunResult(
         run_id=run_id,
@@ -258,7 +268,11 @@ def revise(result: RunResult, variant: str, choices: Mapping[int, str]) -> RunRe
     # Разбивка остаётся разбивкой прогона: время исправления в бюджет цикла не
     # входит, между прогоном и исправлением лежит решение пользователя.
     fresh = repaired.report.model_copy(
-        update={"findings": earlier + list(repaired.report.findings), "timings": report.timings}
+        update={
+            "findings": earlier + list(repaired.report.findings),
+            "timings": report.timings,
+            "prompt_versions": report.prompt_versions,
+        }
     )
 
     variants = [repaired.deck if item.variant == variant else item for item in result.variants]

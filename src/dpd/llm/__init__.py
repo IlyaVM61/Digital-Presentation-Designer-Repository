@@ -10,7 +10,18 @@
 каждого прогона, иначе утверждение о воспроизводимости непроверяемо.
 """
 
-from dpd.llm.client import ModelClient, ModelError
+from dpd.llm.client import ModelClient, ModelError, build_client
+from dpd.llm.prompts import Prompt, PromptError, PromptSet, load_prompts
 from dpd.llm.settings import ModelSettings, load_settings
 
-__all__ = ["ModelClient", "ModelError", "ModelSettings", "load_settings"]
+__all__ = [
+    "ModelClient",
+    "ModelError",
+    "ModelSettings",
+    "Prompt",
+    "PromptError",
+    "PromptSet",
+    "build_client",
+    "load_prompts",
+    "load_settings",
+]

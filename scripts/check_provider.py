@@ -5,7 +5,8 @@
     D:\venvs\\dpd\\Scripts\\python scripts/check_provider.py
 
 Ключ читается из переменной окружения `LLM_API_KEY` или из файла `.env`
-рядом с проектом. В репозиторий `.env` не попадает.
+рядом с проектом. В репозиторий `.env` не попадает. Вопрос модели — промпт
+`prompts/service/provider-check.md`: промптам в коде не место (ТЗ, п. 2.4).
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from dpd.llm import load_prompts
 
 BASE_URL = os.environ.get("LLM_BASE_URL", "https://openrouter.ai/api/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "qwen/qwen3-32b")
@@ -36,11 +39,11 @@ def read_key() -> str | None:
     return None
 
 
-def ask(key: str, model: str) -> tuple[bool, str]:
+def ask(key: str, model: str, question: str) -> tuple[bool, str]:
     payload = json.dumps(
         {
             "model": model,
-            "messages": [{"role": "user", "content": "Ответь одним словом: работает"}],
+            "messages": [{"role": "user", "content": question}],
             "max_tokens": 16,
         }
     ).encode("utf-8")
@@ -72,9 +75,10 @@ def main() -> int:
         return 1
 
     print(f"провайдер: {BASE_URL}")
+    question = load_prompts().get("service/provider-check").text
     failures = 0
     for role, model in (("LLM", LLM_MODEL), ("VLM", VLM_MODEL)):
-        ok, message = ask(key, model)
+        ok, message = ask(key, model, question)
         print(f"  {role} {model}: {'ОК — ' + message if ok else 'ОТКАЗ — ' + message}")
         failures += 0 if ok else 1
     return 1 if failures else 0

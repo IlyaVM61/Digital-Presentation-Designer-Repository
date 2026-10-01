@@ -31,12 +31,14 @@ from typing import TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from dpd.llm.prompts import PromptSet
 from dpd.llm.settings import ModelSettings
 
 T = TypeVar("T", bound=BaseModel)
 
 THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
 ERROR_PLACEHOLDER = "{error}"
+REPAIR_PROMPT = "skills/response-repair"
 MAX_REPORTED_ERRORS = 10
 
 
@@ -165,6 +167,17 @@ class ModelClient:
 
         text = message.get("content") or message.get("reasoning") or ""
         return text, choice.get("finish_reason")
+
+
+
+def build_client(
+    settings: ModelSettings,
+    prompts: PromptSet,
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> ModelClient:
+    """Клиент роли с просьбой исправить ответ из `prompts/` (T-48)."""
+    return ModelClient(settings, repair_prompt=prompts.get(REPAIR_PROMPT).text, transport=transport)
 
 
 def extract_json(text: str) -> str:

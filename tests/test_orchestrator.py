@@ -404,3 +404,30 @@ def test_revised_report_keeps_the_run_timings(template: Path, out_dir: Path) -> 
 
     assert revised.reports[variant].findings != report.findings, "исправление не состоялось"
     assert revised.reports[variant].timings == result.timings
+
+
+# --- T-48: версии промптов в отчёте -----------------------------------------
+#
+# Какими промптами получен результат, должно быть видно из отчёта прогона:
+# без этого воспроизводимость недетерминированной части непроверяема (ТЗ,
+# п. 2.4). Промпты загружаются на старте прогона, и сломанный файл
+# останавливает его до разбора шаблона, а не посреди генерации.
+
+
+def test_every_report_names_the_prompt_set_and_revision_keeps_it(template: Path, out_dir: Path) -> None:
+    from dpd.llm import load_prompts
+    from dpd.orchestrator import revise
+
+    expected = load_prompts().versions()
+    result = run_pipeline(template, structure_from_outline(CROWDED), out_dir / "prompts", formats=("html",))
+
+    assert {key: report.prompt_versions for key, report in result.reports.items()} == {
+        key: expected for key in result.reports
+    }
+
+    variant = result.variants[0].variant
+    report = result.reports[variant]
+    index = next(i for i, f in enumerate(report.findings) if f.check_id == "density.too_many_bullets")
+    revised = revise(result, variant, {index: "split"})
+
+    assert revised.reports[variant].prompt_versions == expected
