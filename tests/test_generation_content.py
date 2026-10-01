@@ -333,15 +333,15 @@ def test_title_slide_with_a_body_is_repaired() -> None:
 
 
 def test_list_numbering_of_the_facts_is_not_a_fact() -> None:
-    """Найдено живым прогоном: «4 часа» при «четырёх часах» в фактуре проверка
+    """Найдено живым прогоном: на число 4, которого в фактуре нет, проверка
     отправила к разделу, где «4.» — номер этапа, и модель трижды не смогла
     это исправить."""
     content = (
         "## Этапы\n\n1. Заявка.\n2. Подбор пары — до 3 дней.\n3. Установочная встреча.\n"
-        "4. Работа в паре.\n   10) Шесть встреч.\n\n## Суть\n\nОколо четырёх часов в месяц."
+        "4. Работа в паре.\n   10) Шесть встреч.\n\n## Суть\n\nПара тратит пару часов в месяц."
     )
     wrong = answer(body=["Пара тратит 4 часа в месяц, 10 встреч"], refs=["content.md#суть"])
-    right = answer(body=["Пара тратит около четырёх часов в месяц"], refs=["content.md#суть"])
+    right = answer(body=["Пара тратит пару часов в месяц"], refs=["content.md#суть"])
     provider = Provider({1: [title_answer()], 2: [wrong, right], 3: [right]})
     prompts = load_prompts()
     client = ModelClient(
@@ -356,7 +356,24 @@ def test_list_numbering_of_the_facts_is_not_a_fact() -> None:
     assert "числа 4 нет в фактуре" in repair and "числа 10 нет в фактуре" in repair
     assert "content.md#этапы" not in repair
     # Число из самого пункта списка остаётся фактом, номер пункта — нет.
-    assert fact_numbers(fact_sections(content)["content.md#этапы"]) == {"3"}
+    assert fact_numbers(fact_sections(content)["content.md#этапы"]) == {"3", "6"}
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Пилот окупился за четыре квартала", {"4"}),
+        ("Процесс состоит из пяти этапов, пара работает три месяца", {"5", "3"}),
+        ("по две пары одновременно, один день теории", {"2", "1"}),
+        ("Каждый пятый новичок увольнялся", set()),
+        ("около четырёх часов в месяц", {"4"}),
+    ],
+)
+def test_number_written_in_words_in_the_facts_may_go_to_the_slide_in_digits(text: str, expected: set[str]) -> None:
+    """Найдено живым прогоном: «4 квартала» при «четыре квартала» в фактуре —
+    то же число, а не пересчёт; модель не отказывалась от цифры три попытки
+    подряд. Порядковое «пятый» числом не считается: «каждый пятый» — не «5»."""
+    assert fact_numbers(text) == expected
 
 
 def test_number_found_in_a_cited_section_passes_whatever_its_spelling() -> None:
