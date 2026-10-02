@@ -21,7 +21,15 @@
 
 from __future__ import annotations
 
+from pptx.enum.shapes import PP_PLACEHOLDER
+
 from dpd.models import Bounds, Canvas, Slot, SlotKind
+
+TABLE_PLACEHOLDERS = {PP_PLACEHOLDER.TABLE}
+"""Плейсхолдеры таблицы: место под таблицу (T-62)."""
+
+PICTURE_PLACEHOLDERS = {PP_PLACEHOLDER.PICTURE, PP_PLACEHOLDER.BITMAP}
+"""Плейсхолдеры картинки: пока картинок нет, поле остаётся пустым (T-62)."""
 
 MIN_SLOT_AREA = 0.01
 """Доля холста, ниже которой фигура считается декорацией.
@@ -106,6 +114,10 @@ def obstacles(layout, canvas: Canvas) -> list[Bounds]:
     видны так же, как свои. Без этого слот на макете из одного заголовка
     ложился поверх декоративной полосы мастера (найдено прогоном T-43).
 
+    Поля таблицы и картинки — тоже препятствия, хотя это плейсхолдеры (T-62):
+    место под текст строилось поверх них, и макет из таблицы и картинки
+    брался под все текстовые слайды колоды.
+
     Фон (почти весь холст) препятствием не считается: обходить его некуда.
     """
     shapes = list(_walk(layout.shapes))
@@ -113,7 +125,7 @@ def obstacles(layout, canvas: Canvas) -> list[Bounds]:
         shapes += _walk(layout.slide_master.shapes)
     found: list[Bounds] = []
     for shape in shapes:
-        if _is_placeholder(shape):
+        if _is_placeholder(shape) and not _is_visual_field(shape):
             continue
         bounds = _bounds_of(shape, canvas)
         if bounds is None:
@@ -180,15 +192,23 @@ def _free_columns(blocked: list[Bounds], top: float, bottom: float) -> tuple[flo
 
     Слот прижимается к той стороне, где больше места: иллюстрация у края —
     обычный приём шаблона, и текст должен встать рядом с ней, а не поверх.
+
+    Элементы, стоящие вплотную друг к другу, сдвигают границу цепочкой, и
+    проход повторяется, пока граница движется: поля таблицы и картинки,
+    поделившие ширину, иначе сдвигали её одно, и место строилось поверх
+    второго — в зависимости от того, какое стоит в разметке первым (T-62).
     """
     left, right = DERIVED_MARGIN, 1 - DERIVED_MARGIN
-    for bounds in blocked:
-        if bounds.y >= bottom or bounds.y + bounds.h <= top:
-            continue
-        if bounds.x <= left and bounds.x + bounds.w < right:
-            left = max(left, bounds.x + bounds.w + GAP)
-        elif bounds.x + bounds.w >= right and bounds.x > left:
-            right = min(right, bounds.x - GAP)
+    moved = True
+    while moved:
+        moved = False
+        for bounds in blocked:
+            if bounds.y >= bottom or bounds.y + bounds.h <= top:
+                continue
+            if bounds.x <= left and bounds.x + bounds.w < right and bounds.x + bounds.w + GAP > left:
+                left, moved = bounds.x + bounds.w + GAP, True
+            elif bounds.x + bounds.w >= right and bounds.x > left and bounds.x - GAP < right:
+                right, moved = bounds.x - GAP, True
     return left, min(max(right, left), 1.0)
 
 
@@ -257,6 +277,11 @@ def _meant_for_text(shape) -> bool:
 def _shows_master_shapes(layout) -> bool:
     """Видны ли на макете фигуры мастера: атрибут `showMasterSp`, по умолчанию да."""
     return layout._element.get("showMasterSp") not in ("0", "false")
+
+
+def _is_visual_field(shape) -> bool:
+    """Плейсхолдер таблицы или картинки: поле, куда ляжет не текст."""
+    return shape.placeholder_format.type in TABLE_PLACEHOLDERS | PICTURE_PLACEHOLDERS
 
 
 def _is_placeholder(shape) -> bool:

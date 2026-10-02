@@ -34,6 +34,8 @@ from dpd.parsing.frames import resolve_frame, text_box_frame
 from dpd.parsing.inheritance import StyleResolver
 from dpd.parsing.quality import measure
 from dpd.parsing.slots import (
+    PICTURE_PLACEHOLDERS,
+    TABLE_PLACEHOLDERS,
     derived_slot,
     inherit_colour_from_title,
     obstacles,
@@ -46,8 +48,6 @@ PARSER_VERSION = "0.4.0"
 
 _TITLE_PLACEHOLDERS = {PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE}
 _BODY_PLACEHOLDERS = {PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.SUBTITLE, PP_PLACEHOLDER.OBJECT}
-TABLE_PLACEHOLDERS = {PP_PLACEHOLDER.TABLE}
-PICTURE_PLACEHOLDERS = {PP_PLACEHOLDER.PICTURE, PP_PLACEHOLDER.BITMAP}
 
 
 def parse_template(path: str | Path, use_cache: bool = True) -> TemplateSchema:
