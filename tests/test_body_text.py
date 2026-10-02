@@ -30,6 +30,7 @@ from pptx.util import Pt
 
 from dpd.export import export_pptx
 from dpd.layout.composer import compose
+from dpd.layout.filling import SPREAD_FILL
 from dpd.layout.overflow import room_height, text_height
 from dpd.layout.styling import style_for
 from dpd.models import PresentationStructure, SlideBody, StructureSlide, TemplateSchema
@@ -196,13 +197,18 @@ def test_body_grows_but_stays_below_title(schema: TemplateSchema) -> None:
 
 def test_sparse_list_is_spread_over_the_room(schema: TemplateSchema) -> None:
     body = _body(compose(_deck(ITEMS), _only(schema, "Title Only")).slides[0])
+    paragraphs, size = [run.text for run in body.runs], body.runs[0].size_pt
+    height = text_height(paragraphs, body.bounds, schema.canvas, size, body.frame)
+    room = room_height(body.bounds, schema.canvas, body.frame)
     assert body.frame.space_before_pt > 0
+    assert height <= room
+    assert body.anchor == ("middle" if height < SPREAD_FILL * room else "top")
+
+
+def test_list_too_short_to_spread_is_centred(schema: TemplateSchema) -> None:
+    """Отбивка ограничена: два пункта и с ней малы для места — блок встаёт по середине."""
+    body = _body(compose(_deck(ITEMS[:2]), _only(schema, "Title Only")).slides[0])
     assert body.anchor == "middle"
-    paragraphs = [run.text for run in body.runs]
-    size = body.runs[0].size_pt
-    assert text_height(paragraphs, body.bounds, schema.canvas, size, body.frame) <= room_height(
-        body.bounds, schema.canvas, body.frame
-    )
 
 
 def test_placeholder_body_keeps_template_size(schema: TemplateSchema) -> None:
@@ -233,11 +239,12 @@ def test_full_width_line_bounds_the_room(line_schema: TemplateSchema) -> None:
 
 def test_export_writes_bullets_spacing_and_anchor(schema: TemplateSchema, footer_path: Path, tmp_path: Path) -> None:
     only = _only(schema, "Title Only")
-    out = export_pptx(compose(_deck(ITEMS), only), only, footer_path, tmp_path / "deck.pptx")
+    items = ITEMS[:2]
+    out = export_pptx(compose(_deck(items), only), only, footer_path, tmp_path / "deck.pptx")
     slide = Presentation(out).slides[0]
-    box = next(shape for shape in slide.shapes if shape.has_text_frame and shape.text_frame.text.startswith(ITEMS[0]))
+    box = next(shape for shape in slide.shapes if shape.has_text_frame and shape.text_frame.text.startswith(items[0]))
     paragraphs = box.text_frame._txBody.xpath("./a:p")
-    assert len(paragraphs) == len(ITEMS)
+    assert len(paragraphs) == len(items)
     for paragraph in paragraphs:
         ppr = paragraph.find(qn("a:pPr"))
         assert ppr.find(qn("a:buChar")).get("char") == MARKER
