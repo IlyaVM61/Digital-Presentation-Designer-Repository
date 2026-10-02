@@ -266,12 +266,26 @@ def _meant_for_text(shape) -> bool:
     автофигуры, включая пустой декоративный параллелограмм. Пустой декор,
     принятый за слоты, делал макет «разделённым», вёрстка его не выбирала, и
     колода прогона T-43 осталась из одних заголовков.
+
+    Надпись, весь текст которой — поля (номер слайда, дата), — колонтитул,
+    а не место под текст, как и плейсхолдер номера (T-67): номер слайда,
+    нарисованный обычной надписью, забирал тело всех слайдов в угол.
     """
     if not shape.has_text_frame:
+        return False
+    if _only_fields(shape):
         return False
     if shape.text_frame.text.strip():
         return True
     return shape._element.xpath("./p:nvSpPr/p:cNvSpPr/@txBox") in (["1"], ["true"])
+
+
+def _only_fields(shape) -> bool:
+    """В надписи есть поля, а слов вне полей нет."""
+    body = shape.text_frame._txBody
+    if not body.xpath("./a:p/a:fld"):
+        return False
+    return not any(text.strip() for text in body.xpath("./a:p/a:r/a:t/text()"))
 
 
 def _shows_master_shapes(layout) -> bool:

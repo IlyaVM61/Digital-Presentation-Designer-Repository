@@ -21,7 +21,7 @@ from pathlib import Path
 
 from dpd.models import TemplateSchema
 
-PARSER_VERSION = "0.4.0"
+PARSER_VERSION = "0.4.1"
 """Версия разбора. Повышается при изменении того, что парсер кладёт в схему."""
 
 
