@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dpd.layout.charts import build as build_chart
-from dpd.layout.filling import bullet_for, ceiling, grown, growable, spread, with_bullet
+from dpd.layout.filling import bullet_for, ceiling, growable, grown, spread, with_bullet
 from dpd.layout.overflow import plan_compensations
 from dpd.layout.selector import roomiest_slot, select, visual_slot
 from dpd.layout.styling import apply, style_for

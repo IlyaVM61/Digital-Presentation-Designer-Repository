@@ -17,13 +17,19 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from statistics import median
 from pathlib import Path
+from statistics import median
 
 from pptx import Presentation
 from pptx.oxml.ns import qn
 
-from dpd.models.tokens import BulletToken, ColorToken, DesignTokens, FontToken, TypeScale
+from dpd.models.tokens import (
+    BulletToken,
+    ColorToken,
+    DesignTokens,
+    FontToken,
+    TypeScale,
+)
 from dpd.parsing.inheritance import StyleResolver, _master_style_name, _read_theme_fonts
 
 FREQUENCY = "shapes.frequency"

@@ -64,7 +64,14 @@ from dpd.models.template import (
     TextStyle,
     VariantGroup,
 )
-from dpd.models.tokens import BulletToken, ColorToken, DesignTokens, FontToken, Token, TypeScale
+from dpd.models.tokens import (
+    BulletToken,
+    ColorToken,
+    DesignTokens,
+    FontToken,
+    Token,
+    TypeScale,
+)
 
 __all__ = [
     "AuditReport",
@@ -73,6 +80,7 @@ __all__ = [
     "BackgroundKind",
     "BodyKind",
     "Bounds",
+    "BulletToken",
     "Canvas",
     "Category",
     "ChartSeries",
@@ -83,7 +91,6 @@ __all__ = [
     "Compensation",
     "Contract",
     "Decision",
-    "BulletToken",
     "DesignTokens",
     "ElementKind",
     "Finding",

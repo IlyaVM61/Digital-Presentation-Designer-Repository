@@ -44,7 +44,7 @@ from dpd.parsing.slots import (
 from dpd.parsing.tokens import extract_design_tokens
 from dpd.parsing.variants import colour_scheme, group
 
-PARSER_VERSION = "0.4.1"
+PARSER_VERSION = "0.5.0"
 
 _TITLE_PLACEHOLDERS = {PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE}
 _BODY_PLACEHOLDERS = {PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.SUBTITLE, PP_PLACEHOLDER.OBJECT}

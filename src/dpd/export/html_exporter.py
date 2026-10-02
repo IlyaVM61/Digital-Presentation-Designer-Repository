@@ -133,6 +133,9 @@ def _position(bounds: Bounds) -> str:
 
 
 def _paragraphs(element: RenderedElement, scheme: str) -> str:
+    """Абзацы текста; маркер, отбивка и положение по высоте — как в `.pptx` (T-69)."""
+    spacing = element.frame.space_before_pt if element.frame else 0.0
+    bullet = element.bullet
     lines = []
     for run in element.runs:
         if not run.text.strip():
@@ -143,8 +146,19 @@ def _paragraphs(element: RenderedElement, scheme: str) -> str:
         style.append(f"color: {run.color or SCHEME_TEXT.get(scheme, '#111418')}")
         if run.bold:
             style.append("font-weight: 700")
-        lines.append(f'<p style="{"; ".join(style)}">{html.escape(run.text)}</p>')
-    return "\n".join(lines)
+        if spacing:
+            style.append(f"margin-top: {spacing:g}pt")
+        marker = ""
+        if bullet is not None:
+            style.append("padding-left: 1.2em; text-indent: -1.2em")
+            look = f"font-family: '{bullet.font}'; " if bullet.font else ""
+            look += f"color: {bullet.color}; " if bullet.color else ""
+            marker = f'<span style="{look}display: inline-block; width: 1.2em; text-indent: 0">{html.escape(bullet.char)}</span>'
+        lines.append(f'<p style="{"; ".join(style)}">{marker}{html.escape(run.text)}</p>')
+    text = "\n".join(lines)
+    if element.anchor == "middle":
+        return f'<div style="display: flex; flex-direction: column; justify-content: center; height: 100%">{text}</div>'
+    return text
 
 
 def _table(table: RenderedTable) -> str:
