@@ -105,7 +105,8 @@ def _fill_slide(pptx_slide, elements: list[RenderedElement], slots: dict[str, Sl
                 used.add(slot.placeholder_idx)
             continue
         if element.kind == "table" and element.table is not None:
-            _write_table(pptx_slide, element, canvas)
+            field = placeholders.get(slot.placeholder_idx) if slot and slot.kind == "table" else None
+            _write_table(pptx_slide, element, canvas, field)
             if slot and slot.placeholder_idx is not None:
                 used.add(slot.placeholder_idx)
             continue
@@ -242,23 +243,35 @@ def _title_axes(chart, spec) -> None:
         chart.value_axis.axis_title.text_frame.text = spec.axis_titles.value
 
 
-def _write_table(pptx_slide, element, canvas: Canvas) -> None:
+def _write_table(pptx_slide, element, canvas: Canvas, field=None) -> None:
     """Вставить нативную таблицу PowerPoint.
 
     Именно нативную: таблица, нарисованная линиями или вставленная
     картинкой, не редактируется, а ТЗ требует редактируемых объектов.
     Оформление приходит из вёрстки — синтезированное из токенов шаблона.
+
+    `field` — плейсхолдер таблицы слайда (T-62): таблица вставляется в него
+    и остаётся полем шаблона, а не ложится рядом с пустым полем.
     """
     table = element.table
     rows, columns = len(table.rows) + 1, max(len(table.headers), 1)
-    shape = pptx_slide.shapes.add_table(
-        rows,
-        columns,
+    x, y, width, height = (
         Emu(round(element.bounds.x * canvas.width_emu)),
         Emu(round(element.bounds.y * canvas.height_emu)),
         Emu(round(element.bounds.w * canvas.width_emu)),
         Emu(round(element.bounds.h * canvas.height_emu)),
     )
+    if field is not None and hasattr(field, "insert_table"):
+        shape = field.insert_table(rows, columns)
+        # Высоту строк поле задаёт по умолчанию — под число строк; вёрстка
+        # рассчитала таблицу на всё место.
+        shape.left, shape.top, shape.width, shape.height = x, y, width, height
+        for row in shape.table.rows:
+            row.height = Emu(height // rows)
+        for column in shape.table.columns:
+            column.width = Emu(width // columns)
+    else:
+        shape = pptx_slide.shapes.add_table(rows, columns, x, y, width, height)
     grid = shape.table
 
     # Заливку каждой ячейки задаёт вёрстка. Без явной заливки ячейку красит

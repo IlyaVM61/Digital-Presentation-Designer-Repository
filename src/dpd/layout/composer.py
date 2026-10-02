@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dpd.layout.charts import build as build_chart
 from dpd.layout.overflow import plan_compensations
-from dpd.layout.selector import roomiest_slot, select
+from dpd.layout.selector import roomiest_slot, select, visual_slot
 from dpd.layout.styling import apply, style_for
 from dpd.layout.tables import build as build_table
 from dpd.models import (
@@ -116,16 +116,24 @@ def _compose_slide(
             applied_compensations=compensations,
         )
 
-    if body_slot is not None and visual is not None and visual.kind == "table" and visual.table:
+    table_slot = visual_slot(layout, "table")
+    if table_slot is not None and visual is not None and visual.kind == "table" and visual.table:
         # Визуализация занимает место содержимого: таблица и текст в одном
-        # слоте наложились бы друг на друга.
-        style = style_for(body_slot, tokens, size_shift, decisions)
-        styled = body_slot.model_copy(update={"text_style": style})
+        # слоте наложились бы друг на друга. У таблицы со своим полем (T-62)
+        # текстовое поле свободно, и тело ложится в него.
+        style = style_for(table_slot, tokens, size_shift, decisions)
+        styled = table_slot.model_copy(update={"text_style": style})
         table, applied = build_table(visual.table, styled, tokens, _plain_background(layout))
         elements.append(
-            _RE(slot_id=body_slot.id, kind="table", bounds=body_slot.bounds, table=table, frame=body_slot.frame)
+            _RE(slot_id=table_slot.id, kind="table", bounds=table_slot.bounds, table=table, frame=table_slot.frame)
         )
         compensations.extend(applied)
+        if table_slot.kind == "table" and body_slot is not None and slide.body and slide.body.items:
+            placed, applied = _text_columns(
+                _columns(layout, body_slot), slide.body.items, tokens, template.canvas, scale, size_shift, decisions
+            )
+            elements.extend(placed)
+            compensations.extend(applied)
         return Slide(
             id=slide.id,
             layout_id=layout.id,
