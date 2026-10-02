@@ -446,6 +446,21 @@ def test_list_does_not_continue_into_the_place_below() -> None:
     assert texts["body-1"] == WAVES
 
 
+def test_list_starts_in_the_upper_of_two_equal_places() -> None:
+    """Нижнее место просторнее верхнего на шум разметки — список всё равно сверху.
+
+    На VK Education («Цитата без фото») из двух равных мест одно под другим
+    нижнее больше на десятимиллионную долю холста: список в нём оставил бы
+    над собой пустой блок.
+    """
+    layout = _stacked()
+    upper, lower = layout.slots[1], layout.slots[2]
+    taller = lower.model_copy(update={"bounds": lower.bounds.model_copy(update={"h": 0.3400002})})
+    layout = layout.model_copy(update={"slots": [TITLE, upper, taller]})
+    slide = compose(_text_slide(WAVES), _schema(layout)).slides[0]
+    assert _body_texts(slide) == {"body-1": WAVES}
+
+
 def test_list_flows_only_across_its_own_row() -> None:
     """В сетке 2 × 2 список идёт по колонкам верхнего ряда, нижний не трогает."""
     slide = compose(_text_slide(WAVES, "process"), _schema(_grid())).slides[0]

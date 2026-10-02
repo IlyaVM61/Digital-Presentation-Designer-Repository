@@ -169,26 +169,33 @@ COLUMN_TOLERANCE = 0.1
 
 
 def _columns(layout: Layout, main: Slot) -> list[Slot]:
-    """Колонки ряда, к которому принадлежит самое просторное место.
+    """Колонки, по которым идёт тело: верхний ряд мест размера самого просторного.
 
     Колонка — место под содержимое того же размера, что и самое просторное,
     на той же высоте: так шаблон размечает «две колонки» и «три колонки».
     Полоска надзаголовка рядом с областью — не колонка. Место того же размера
     над областью или под ней — тоже (T-64, вопрос T25): продолженный в нём
     список разрывается промежутком и читается как два списка, а колонки
-    рядом — как один. Порядок — слева направо: верхние края колонок,
-    нарисованных от руки, расходятся на доли процента, и порядок по ним
-    начинал бы список в правой колонке.
+    рядом — как один.
+
+    Ряд — верхний из рядов таких мест, а не ряд самого просторного: равные
+    места различаются по площади на шум разметки, и на VK Education
+    («Цитата без фото») нижнее из двух равных просторнее верхнего на
+    десятимиллионную долю — список уходил бы вниз под пустой блок. Порядок
+    в ряду — слева направо: верхние края колонок, нарисованных от руки,
+    расходятся на доли процента, и порядок по ним начинал бы список в правой
+    колонке.
     """
-    def alike(slot: Slot) -> bool:
+    def same_size(slot: Slot) -> bool:
         return (
             abs(slot.bounds.w - main.bounds.w) <= COLUMN_TOLERANCE * main.bounds.w
             and abs(slot.bounds.h - main.bounds.h) <= COLUMN_TOLERANCE * main.bounds.h
-            and abs(slot.bounds.y - main.bounds.y) <= COLUMN_TOLERANCE * main.bounds.h
         )
 
-    columns = [slot for slot in layout.slots if slot.kind == "body" and alike(slot)]
-    return sorted(columns, key=lambda slot: slot.bounds.x)
+    alike = [slot for slot in layout.slots if slot.kind == "body" and same_size(slot)]
+    top = min(alike, key=lambda slot: (slot.bounds.y, slot.bounds.x))
+    row = [slot for slot in alike if abs(slot.bounds.y - top.bounds.y) <= COLUMN_TOLERANCE * main.bounds.h]
+    return sorted(row, key=lambda slot: slot.bounds.x)
 
 
 def _split(items: list[str], parts: int) -> list[list[str]]:
