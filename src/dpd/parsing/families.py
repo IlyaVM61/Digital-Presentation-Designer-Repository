@@ -9,12 +9,18 @@
 заголовок. Это же делает классификацию переносимой на шаблон с именами на
 любом языке.
 
+**Исключение — договорённость об именах (T-62, ADR-0008).** Если имя каждого
+макета шаблона начинается с префикса назначения (`title`, `section`,
+`slide`, `table`, `last`), имя — заявление автора, а не след дублирования, и
+назначение берётся из него: геометрия обложки, раздела и финала одинакова,
+и варианты ставили обложку на финальный макет.
+
 Слой детерминированный: моделей не вызывает.
 """
 
 from __future__ import annotations
 
-from dpd.models import Layout, LayoutFamily
+from dpd.models import Layout, LayoutFamily, LayoutPurpose
 
 TITLE_BAND = 0.2
 """Доля высоты холста, ниже которой заголовок перестаёт быть «шапкой».
@@ -52,3 +58,56 @@ def classified(layout: Layout) -> Layout:
     return layout.model_copy(
         update={"family": classify(layout.slots), "family_source": "structure"}
     )
+
+
+NAME_PREFIXES: tuple[tuple[str, LayoutPurpose], ...] = (
+    ("title", "cover"),
+    ("section", "section"),
+    ("slide", "regular"),
+    ("table", "table"),
+    ("last", "closing"),
+)
+"""Договорённость об именах макетов: префикс имени → назначение.
+
+Префикс сравнивается с учётом регистра: имена макетов редакторов —
+«Title Slide», «TITLE_AND_BODY» — пишутся с заглавной и договорённостью не
+являются, а одно случайное совпадение и так ничего не решает — нужны все
+макеты шаблона."""
+
+PURPOSE_FAMILY: dict[LayoutPurpose, LayoutFamily] = {
+    "cover": "title",
+    "section": "section",
+    "closing": "title",
+}
+"""Тип макета, следующий из назначения. Обычному слайду и слайду с таблицей
+тип по-прежнему даёт геометрия: одно место под содержимое или несколько —
+об этом имя не говорит."""
+
+
+def purpose_of(name: str) -> LayoutPurpose | None:
+    """Назначение макета по префиксу имени; `None` — имя вне договорённости."""
+    return next((purpose for prefix, purpose in NAME_PREFIXES if name.startswith(prefix)), None)
+
+
+def named(layouts: list[Layout]) -> list[Layout]:
+    """Проставить назначение из имён, если договорённости следуют все макеты.
+
+    Иначе имена не сигнал, и макеты возвращаются как есть — с типом из
+    геометрии. Решение принимается по шаблону целиком: в калибровочном
+    шаблоне 11 макетов из 15 называются одинаково, и имя одного макета,
+    случайно совпавшее с префиксом, ничего не говорит.
+    """
+    purposes = [purpose_of(layout.name) for layout in layouts]
+    if not layouts or None in purposes:
+        return layouts
+    return [_with_purpose(layout, purpose) for layout, purpose in zip(layouts, purposes)]
+
+
+def _with_purpose(layout: Layout, purpose: LayoutPurpose) -> Layout:
+    family = PURPOSE_FAMILY.get(purpose)
+    if family is None:
+        # Обычный слайд и слайд с таблицей — рабочие, даже если геометрия
+        # сочла иначе: макет из таблицы и картинки без тела она относит к
+        # разделам.
+        family = layout.family if layout.family in ("content", "split") else "content"
+    return layout.model_copy(update={"purpose": purpose, "family": family, "family_source": "name"})

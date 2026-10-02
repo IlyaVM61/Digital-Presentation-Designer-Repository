@@ -29,7 +29,7 @@ from dpd.models import (
 from dpd.parsing.background import detect
 from dpd.parsing.cache import load as load_cached
 from dpd.parsing.cache import store as store_cached
-from dpd.parsing.families import classified
+from dpd.parsing.families import classified, named
 from dpd.parsing.frames import resolve_frame, text_box_frame
 from dpd.parsing.inheritance import StyleResolver
 from dpd.parsing.quality import measure
@@ -42,10 +42,12 @@ from dpd.parsing.slots import (
 from dpd.parsing.tokens import extract_design_tokens
 from dpd.parsing.variants import colour_scheme, group
 
-PARSER_VERSION = "0.3.0"
+PARSER_VERSION = "0.4.0"
 
 _TITLE_PLACEHOLDERS = {PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE}
 _BODY_PLACEHOLDERS = {PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.SUBTITLE, PP_PLACEHOLDER.OBJECT}
+TABLE_PLACEHOLDERS = {PP_PLACEHOLDER.TABLE}
+PICTURE_PLACEHOLDERS = {PP_PLACEHOLDER.PICTURE, PP_PLACEHOLDER.BITMAP}
 
 
 def parse_template(path: str | Path, use_cache: bool = True) -> TemplateSchema:
@@ -75,6 +77,9 @@ def parse_template(path: str | Path, use_cache: bool = True) -> TemplateSchema:
         for master_number, master in enumerate(presentation.slide_masters, start=1)
         for layout in master.slide_layouts
     ]
+    # Имя сильнее геометрии, только если договорённости следуют все макеты
+    # шаблона (ADR-0008): решается по всем сразу, а не по одному.
+    layouts = named(layouts)
     # Цветовые вариации связываются после разбора всех макетов: группа
     # существует только относительно других макетов того же типа.
     layouts = group([
@@ -189,6 +194,13 @@ def _slot_kind(placeholder) -> SlotKind:
         return "title"
     if placeholder_type in _BODY_PLACEHOLDERS:
         return "body"
+    # Поля таблицы и картинки — не «прочее» (T-62): таблица ложится в своё
+    # поле, а поле картинки, пока картинок нет, остаётся пустым, и выбор
+    # макета это учитывает.
+    if placeholder_type in TABLE_PLACEHOLDERS:
+        return "table"
+    if placeholder_type in PICTURE_PLACEHOLDERS:
+        return "picture"
     return "other"
 
 

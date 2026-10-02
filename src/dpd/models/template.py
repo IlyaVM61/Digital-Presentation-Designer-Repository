@@ -19,7 +19,11 @@ from pydantic import Field
 from dpd.models.common import Bounds, Canvas, Contract, TextFrame
 from dpd.models.tokens import DesignTokens
 
-SlotKind = Literal["title", "body", "other"]
+SlotKind = Literal["title", "body", "table", "picture", "other"]
+"""Вид слота. `table` и `picture` — плейсхолдеры таблицы и картинки (T-62):
+таблица ложится в своё поле, а не в текстовое, и место под текст в свободной
+области оба обходят. `other` — номер слайда, дата, колонтитулы и прочее, что
+местом под содержимое не считается."""
 
 BackgroundKind = Literal["solid", "gradient", "image", "inherited"]
 
@@ -95,6 +99,12 @@ SlotOrigin = Literal["placeholder", "shape", "derived"]
 только плейсхолдер заголовка."""
 
 
+LayoutPurpose = Literal["cover", "section", "regular", "table", "closing"]
+"""Назначение макета, прочитанное из имени по договорённости (T-62, ADR-0008):
+обложка, раздел, обычный слайд, слайд с таблицей, финал. Геометрия его не
+различает: обложка, раздел и финал одной геометрии — одно семейство «title»."""
+
+
 class TemplateSource(Contract):
     """Происхождение схемы: по хешу файла работает кеширование разбора (T-19)."""
 
@@ -167,15 +177,20 @@ class FixedElement(Contract):
 class Layout(Contract):
     """Макет шаблона.
 
-    `name` хранится, но доверия к нему нет: в одном из калибровочных шаблонов
-    11 макетов из 15 называются одинаково. Тип макета выводится из структуры
-    слотов — поле `family` появится задачей T-14.
+    `name` в общем случае доверия не заслуживает: в одном из калибровочных
+    шаблонов 11 макетов из 15 называются одинаково. Тип макета выводится из
+    структуры слотов, `family_source="structure"`.
+
+    Исключение — шаблон, все макеты которого следуют договорённости об
+    именах (ADR-0008): тогда `purpose` прочитан из имени, тип выведен из
+    назначения, а `family_source="name"`. Без договорённости `purpose` — `None`.
     """
 
     id: str
     name: str
     family: LayoutFamily = "blank"
     family_source: str = "structure"
+    purpose: LayoutPurpose | None = None
     background: Background = Field(default_factory=Background)
     color_scheme: ColorScheme = "unknown"
     variant_group: VariantGroup | None = None
