@@ -192,35 +192,26 @@ def derived_slot(
 
 
 def _trim_edges(blocked: list[Bounds], top: float, bottom: float) -> tuple[float, float]:
-    """Укоротить полосу из-за мелкого элемента у её края, если так дешевле (T-69).
+    """Укоротить полосу из-за мелких элементов у её края, если так просторнее (T-69).
 
-    Подпись колонтитула у нижнего края сужала место по всей высоте: на
-    корпоративном шаблоне текст начинался с пятой части ширины. Элемент в
-    нижней или верхней половине полосы отсекает край полосы, когда это
-    теряет меньше площади, чем сужение; высокая боковая иллюстрация
-    пересекает середину и, как прежде, сужает место.
+    Подписи колонтитула у нижнего края сужали место по всей высоте: на
+    корпоративном шаблоне текст начинался с пятой части ширины. Кандидаты
+    среза — края элементов, лежащих целиком в нижней или верхней половине
+    полосы; берётся срез, после которого место с учётом сужения просторнее
+    всего. Один срез убирает все элементы ниже него, поэтому сравнивается
+    итоговая площадь, а не потери от каждого элемента. Высокая боковая
+    иллюстрация пересекает середину и, как прежде, сужает место.
     """
-    width = 1 - 2 * DERIVED_MARGIN
-    moved = True
-    while moved:
-        moved = False
-        for bounds in blocked:
-            if bounds.y >= bottom or bounds.y + bounds.h <= top:
-                continue
-            middle = (top + bottom) / 2
-            narrowing = _narrowing(bounds) * (bottom - top)
-            if bounds.y >= middle and (bottom - bounds.y + GAP) * width < narrowing:
-                bottom, moved = bounds.y - GAP, True
-            elif bounds.y + bounds.h <= middle and (bounds.y + bounds.h + GAP - top) * width < narrowing:
-                top, moved = bounds.y + bounds.h + GAP, True
-    return top, bottom
+    middle = (top + bottom) / 2
+    crossing = [b for b in blocked if b.y < bottom and b.y + b.h > top]
+    tops = [top] + [b.y + b.h + GAP for b in crossing if b.y + b.h <= middle]
+    bottoms = [bottom] + [b.y - GAP for b in crossing if b.y >= middle]
 
+    def room(edges: tuple[float, float]) -> float:
+        left, right = _free_columns(blocked, *edges)
+        return max(edges[1] - edges[0], 0.0) * max(right - left, 0.0)
 
-def _narrowing(bounds: Bounds) -> float:
-    """Сколько ширины отняло бы сужение места в обход элемента."""
-    from_left = bounds.x + bounds.w + GAP - DERIVED_MARGIN
-    from_right = 1 - DERIVED_MARGIN - (bounds.x - GAP)
-    return max(min(from_left, from_right), 0.0)
+    return max(((upper, lower) for upper in tops for lower in bottoms), key=room)
 
 
 def _free_columns(blocked: list[Bounds], top: float, bottom: float) -> tuple[float, float]:
