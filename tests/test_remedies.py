@@ -117,6 +117,34 @@ def test_crowded_slide_is_offered_to_move_points(repaired) -> None:
     assert [item.id for item in offered.get(index, [])] == ["split"]
 
 
+def _sparse(repaired) -> tuple[AuditContext, AuditReport]:
+    """Слайд из двух пунктов мелким кеглем у верхнего края.
+
+    Вёрстка такой слайд больше не собирает: с T-69 тело в своей рамке
+    растёт и разводится по высоте. Полупустой слайд задаётся здесь явно —
+    правило о бесполезном действии от этого не зависит.
+    """
+    context, _ = repaired
+    smallest = min(context.template.design_tokens.type_scale.values)
+    slides = list(context.deck.slides)
+    slide = slides[1]
+    elements = [
+        element
+        if element.kind != "text" or element.slot_id.startswith("title")
+        else element.model_copy(
+            update={
+                "runs": [run.model_copy(update={"size_pt": smallest}) for run in element.runs],
+                "frame": element.frame.model_copy(update={"space_before_pt": 0.0}) if element.frame else None,
+                "anchor": "top",
+            }
+        )
+        for element in slide.elements
+    ]
+    slides[1] = slide.model_copy(update={"elements": elements})
+    result = repair(replace(context, deck=context.deck.model_copy(update={"slides": slides})))
+    return replace(context, deck=result.deck), result.report
+
+
 def test_action_that_would_not_help_is_not_offered(repaired) -> None:
     """Слабо заполненный слайд переносом пунктов не вылечить — стало бы хуже.
 
@@ -125,7 +153,7 @@ def test_action_that_would_not_help_is_not_offered(repaired) -> None:
     видит. Поэтому действие не показывается вовсе, а не показывается и
     отклоняется после нажатия.
     """
-    context, report = repaired
+    context, report = _sparse(repaired)
     sparse = next(
         index
         for index, finding in enumerate(report.findings)
