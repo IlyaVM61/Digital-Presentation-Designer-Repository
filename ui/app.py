@@ -45,7 +45,6 @@ from __future__ import annotations
 
 import os
 import re
-import tempfile
 import time
 from collections import Counter
 from pathlib import Path
@@ -63,6 +62,7 @@ from dpd.orchestrator import (
     Revision,
     RunResult,
     draft,
+    keep_template,
     look,
     revise,
     run_pipeline,
@@ -98,27 +98,20 @@ def output_dir() -> Path:
 
 
 @st.cache_data(show_spinner=False)
-def diagnose(template_bytes: bytes, name: str) -> dict[str, object]:
+def diagnose(path: str) -> dict[str, object]:
     """Разобрать шаблон и вернуть то, что стоит показать до сборки.
 
-    Кеш по содержимому файла: разбор занимает десятые доли секунды, но
-    Streamlit перезапускает скрипт на каждое действие, и повторять его на
-    каждый щелчок незачем.
+    Кеш по пути копии, а путь — по содержимому файла (`keep_template`):
+    разбор занимает десятые доли секунды, но Streamlit перезапускает скрипт
+    на каждое действие, и повторять его на каждый щелчок незачем.
     """
     from dpd.parsing import parse_template
-
-    # Имя файла сохраняется как есть: от него зависят имена готовых файлов,
-    # и пользователь должен узнать в них свой шаблон, а не служебный номер.
-    folder = Path(tempfile.gettempdir()) / f"dpd-{abs(hash(template_bytes))}"
-    folder.mkdir(exist_ok=True)
-    path = folder / Path(name).name
-    path.write_bytes(template_bytes)
 
     schema = parse_template(path)
     tokens = schema.design_tokens
     leading = tokens.fonts[0] if tokens and tokens.fonts else None
     return {
-        "path": path,
+        "path": Path(path),
         "layouts": len(schema.layouts),
         "slots": sum(len(layout.slots) for layout in schema.layouts),
         "font": leading.family if leading else "не определён",
@@ -391,7 +384,10 @@ uploaded = st.file_uploader("Шаблон презентации", type=["pptx"]
 report = None
 if uploaded is not None:
     try:
-        report = diagnose(uploaded.getvalue(), uploaded.name)
+        # Копия одна на шаблон и лежит с результатами, а не во временном
+        # каталоге системы на тесном диске C (T-63).
+        kept = keep_template(uploaded.getvalue(), uploaded.name, output_dir() / "templates")
+        report = diagnose(str(kept))
     except Exception as error:  # noqa: BLE001 — пользователю нужна фраза, а не трассировка
         st.error(
             "Этот файл не получилось открыть как презентацию. Проверьте, что это `.pptx` "

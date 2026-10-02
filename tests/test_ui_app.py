@@ -16,10 +16,12 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 APP = Path(__file__).resolve().parents[1] / "ui" / "app.py"
@@ -121,6 +123,34 @@ def test_diagnostics_appear_right_after_upload(app: AppTest) -> None:
     diagnostics = " ".join(item.value for item in app.markdown)
     assert "макет" in diagnostics.lower(), "число макетов не показано"
     assert "Play" in diagnostics, "ведущая гарнитура шаблона не показана"
+
+
+def test_uploaded_template_is_kept_once_beside_the_results(
+    out_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Копия шаблона лежит в каталоге результатов, одна на шаблон (T-63).
+
+    Прежде она ложилась во временный каталог системы, на диск C, под ключом,
+    который менялся с каждым процессом: 99 копий за два дня. Кеш разбора
+    сбрасывается, чтобы страница действительно прошла путь загрузки, а не
+    взяла итог прошлого теста.
+    """
+    system = tmp_path / "system-temp"
+    system.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(system))
+    st.cache_data.clear()
+
+    first = upload(AppTest.from_file(str(APP), default_timeout=180), template_file())
+    assert not first.exception, first.exception
+    copies = sorted(out_dir.rglob(TEMPLATE))
+
+    st.cache_data.clear()
+    again = upload(AppTest.from_file(str(APP), default_timeout=180), template_file())
+    assert not again.exception, again.exception
+
+    assert not any(system.iterdir()), "копия шаблона легла во временный каталог системы"
+    assert len(copies) == 1, f"копий шаблона в каталоге результатов: {len(copies)}"
+    assert sorted(out_dir.rglob(TEMPLATE)) == copies, "повторная загрузка сделала новую копию"
 
 
 # --- Сценарий от файла до экспорта -----------------------------------------
