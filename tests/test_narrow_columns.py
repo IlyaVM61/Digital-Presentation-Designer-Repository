@@ -410,6 +410,66 @@ def test_unequal_body_slots_are_not_columns() -> None:
     assert list(_body_texts(slide)) == ["body-2"]
 
 
+# --- T-64: колонки — только рядом -------------------------------------------
+#
+# Правило T-60 брало равные места в порядке чтения — сверху вниз, слева
+# направо — и продолжало список и в месте под первым: два блока с промежутком
+# посередине читаются как два списка, а не как один (вопрос T25, решение
+# владельца — вариант «а»). Колонка — место того же размера на той же высоте.
+
+
+def _stacked() -> Layout:
+    """Два равных места одно над другим."""
+    return Layout(
+        id="m/stacked", name="Два блока", family="content",
+        slots=[
+            TITLE,
+            _slot("body-1", "body", 0.06, 0.2, 0.88, 0.34),
+            _slot("body-2", "body", 0.06, 0.58, 0.88, 0.34),
+        ],
+    )
+
+
+def _grid() -> Layout:
+    """Сетка 2 × 2: две колонки в два ряда."""
+    slots = [TITLE]
+    for row, y in enumerate((0.2, 0.58)):
+        for col, x in enumerate((0.06, 0.51)):
+            slots.append(_slot(f"body-{row * 2 + col + 1}", "body", x, y, 0.43, 0.34))
+    return Layout(id="m/grid", name="Четыре блока", family="split", slots=slots)
+
+
+def test_list_does_not_continue_into_the_place_below() -> None:
+    slide = compose(_text_slide(WAVES), _schema(_stacked())).slides[0]
+    texts = _body_texts(slide)
+    assert list(texts) == ["body-1"]
+    assert texts["body-1"] == WAVES
+
+
+def test_list_flows_only_across_its_own_row() -> None:
+    """В сетке 2 × 2 список идёт по колонкам верхнего ряда, нижний не трогает."""
+    slide = compose(_text_slide(WAVES, "process"), _schema(_grid())).slides[0]
+    texts = _body_texts(slide)
+    assert list(texts) == ["body-1", "body-2"]
+    assert [item for column in texts.values() for item in column] == WAVES
+
+
+def test_columns_drawn_slightly_off_line_flow_left_to_right() -> None:
+    """Колонки, разошедшиеся по высоте на доли процента холста, — один ряд.
+
+    Порядок в ряду — слева направо, а не по тому, чья рамка начинается
+    чуть выше: иначе список начинался бы в правой колонке.
+    """
+    layout = _columns(2, width=0.42)
+    left, right = layout.slots[1], layout.slots[2]
+    raised = right.model_copy(update={"bounds": right.bounds.model_copy(update={"y": 0.25})})
+    layout = layout.model_copy(update={"slots": [TITLE, left, raised]})
+    slide = compose(_text_slide(WAVES, "process"), _schema(layout)).slides[0]
+    texts = _body_texts(slide)
+    assert list(texts) == ["body-1", "body-2"]
+    assert [item for column in texts.values() for item in column] == WAVES
+
+
 # --- 4. Смещение варианта не уводит визуализацию на тесный макет -----------
 
 
