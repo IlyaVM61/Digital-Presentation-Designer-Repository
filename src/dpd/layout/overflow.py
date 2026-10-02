@@ -19,7 +19,10 @@
 отступа абзаца под маркер, межстрочного интервала и отбивок шаблона — они
 приходят из `TextFrame` слота. Строка переносится по словам, а не делится
 по числу знаков. Без этого в колонке шириной 0,21 холста четвёртый пункт
-уходил за нижний край, а метрика считала, что всё помещается.
+уходил за нижний край, а метрика считала, что всё помещается. Ширина буквы
+зависит от жирного начертания и разрядки шаблона (T-68): жирный заголовок
+обложки с разрядкой 1,69 pt метрика считала однострочным, а на рендере он
+уходил во вторую строку за полосу макета.
 
 Слой детерминированный: моделей не вызывает.
 """
@@ -38,8 +41,16 @@ Arial, 0,528 в Segoe UI, 0,533 в Tahoma, у Verdana — 0,604. Прежние 
 любой знак недооценивали длинное слово, и в узкой колонке оно рвалось
 посередине: «масштабировани» / «е»."""
 
+BOLD_LETTER_WIDTH = 0.60
+"""Ширина жирной буквы в долях кегля (T-68).
+
+Замер на тексте контент-пакета: Arial и Liberation Sans жирные — 0,594
+против 0,548 обычных, Segoe UI — 0,585, Tahoma — 0,621, Verdana — 0,686.
+Без поправки жирный заголовок с разрядкой считался однострочным, а на
+рендере уходил во вторую строку за полосу макета."""
+
 SPACE_WIDTH = 0.28
-"""Ширина пробела в долях кегля: 0,274–0,313 в тех же гарнитурах."""
+"""Ширина пробела в долях кегля: 0,274–0,313 в тех же гарнитурах, жирных тоже."""
 
 LINE_HEIGHT = 1.25
 """Межстрочное расстояние в долях кегля."""
@@ -83,7 +94,8 @@ def text_height(
     """Сколько пунктов высоты займёт текст: строки и отбивки абзацев."""
     frame = frame or TextFrame()
     line = _line_width(bounds, canvas, size_pt, frame)
-    lines = sum(wrapped_lines(paragraph, line) for paragraph in paragraphs)
+    letter, space = _glyph_widths(size_pt, frame)
+    lines = sum(wrapped_lines(paragraph, line, letter, space) for paragraph in paragraphs)
     spacing = len(paragraphs) * (frame.space_before_pt + frame.space_after_pt)
     return lines * _line_pitch(size_pt, frame) + spacing
 
@@ -95,7 +107,12 @@ def room_height(bounds: Bounds, canvas: Canvas, frame: TextFrame | None = None) 
     return share * canvas.height_emu / EMU_PER_INCH * POINTS_PER_INCH
 
 
-def wrapped_lines(paragraph: str, line_width: float) -> int:
+def wrapped_lines(
+    paragraph: str,
+    line_width: float,
+    letter: float = LETTER_WIDTH,
+    space: float = SPACE_WIDTH,
+) -> int:
     """Число строк абзаца при переносе по словам; `line_width` — ширина строки в кеглях.
 
     Слово, не влезшее в остаток строки, начинает следующую, и остаток
@@ -103,6 +120,9 @@ def wrapped_lines(paragraph: str, line_width: float) -> int:
     каждые две-три: «аналитика (140» и «пар)» на рендере T-58 — две строки
     там, где деление числа знаков на ширину давало одну. Слово длиннее
     строки рвётся, как его рвёт программа просмотра.
+
+    `letter` и `space` — ширина знака и пробела в кеглях с учётом
+    начертания и разрядки (`_glyph_widths`).
     """
     words = paragraph.split()
     if not words:
@@ -111,8 +131,8 @@ def wrapped_lines(paragraph: str, line_width: float) -> int:
         return sum(len(word) for word in words)
     lines, used = 1, 0.0
     for word in words:
-        width = len(word) * LETTER_WIDTH
-        need = width if not used else used + SPACE_WIDTH + width
+        width = len(word) * letter
+        need = width if not used else used + space + width
         if need <= line_width:
             used = need
             continue
@@ -141,9 +161,11 @@ def words_fit(
     Вёрстка такой кегль не берёт; проверка переполнения его не судит — текст
     в рамке, просто набран плохо.
     """
-    line = _line_width(bounds, canvas, size_pt, frame or TextFrame())
+    frame = frame or TextFrame()
+    line = _line_width(bounds, canvas, size_pt, frame)
+    letter, _ = _glyph_widths(size_pt, frame)
     longest = max((len(word) for paragraph in paragraphs for word in paragraph.split()), default=0)
-    return longest * LETTER_WIDTH <= line
+    return longest * letter <= line
 
 
 def plan_compensations(
@@ -262,6 +284,17 @@ def _line_width(bounds: Bounds, canvas: Canvas, size: float, frame: TextFrame) -
     share = max(bounds.w - frame.inset_left - frame.inset_right - frame.indent, 0.0)
     width_pt = share * canvas.width_emu / EMU_PER_INCH * POINTS_PER_INCH
     return width_pt / size
+
+
+def _glyph_widths(size: float, frame: TextFrame) -> tuple[float, float]:
+    """Ширина знака и пробела в кеглях: начертание и разрядка шаблона (T-68).
+
+    Разрядка прибавляется к каждому знаку, пробелу тоже, и в кеглях тем
+    больше, чем мельче кегль: 1,69 pt — это 0,05 кегля при 32 pt.
+    """
+    extra = frame.letter_spacing_pt / size
+    letter = (BOLD_LETTER_WIDTH if frame.bold else LETTER_WIDTH) + extra
+    return max(letter, 0.0), max(SPACE_WIDTH + extra, 0.0)
 
 
 def _line_pitch(size: float, frame: TextFrame) -> float:

@@ -1,8 +1,9 @@
 """Что отнимает у текста место внутри рамки слота (T-60).
 
 Вместимость слота — не его рамка. Поля рамки (`bodyPr`), отступ текста
-абзаца под маркер (`marL`), межстрочный интервал и отбивки абзацев шаблон
-задаёт так же, как кегль, — по цепочке наследования:
+абзаца под маркер (`marL`), межстрочный интервал, отбивки абзацев, а также
+разрядку (`spc`) и жирное начертание (`b`) прогона по умолчанию (T-68)
+шаблон задаёт так же, как кегль, — по цепочке наследования:
 
     плейсхолдер макета (bodyPr, lstStyle) → плейсхолдер мастера того же типа
       → стили мастера (txStyles) → значение по умолчанию OOXML
@@ -63,6 +64,7 @@ def resolve_frame(placeholder, layout, canvas: Canvas, size_pt: float | None) ->
     defaults = {"lIns": DEFAULT_INSET_X_EMU, "rIns": DEFAULT_INSET_X_EMU,
                 "tIns": DEFAULT_INSET_Y_EMU, "bIns": DEFAULT_INSET_Y_EMU}
     insets = {name: _first_int(bodies, name, defaults[name]) for name in _INSETS}
+    runs = [paragraph.find(A + "defRPr") if paragraph is not None else None for paragraph in paragraphs]
     indent = max(_first_int(paragraphs, "marL", 0), 0)
 
     size = size_pt or 18.0
@@ -77,6 +79,8 @@ def resolve_frame(placeholder, layout, canvas: Canvas, size_pt: float | None) ->
         line_spacing_pt=line_spacing_pt,
         space_before_pt=_spacing(paragraphs, "spcBef", size),
         space_after_pt=_spacing(paragraphs, "spcAft", size),
+        letter_spacing_pt=_first_int(runs, "spc", 0) / 100,
+        bold=_first_attr(runs, "b") in ("1", "true"),
     )
 
 
@@ -126,6 +130,13 @@ def _first_int(chain, name: str, default: int) -> int:
             except ValueError:
                 continue
     return default
+
+
+def _first_attr(chain, name: str) -> str | None:
+    for element in chain:
+        if element is not None and element.get(name) is not None:
+            return element.get(name)
+    return None
 
 
 def _line_spacing(paragraphs) -> tuple[float, float | None]:
