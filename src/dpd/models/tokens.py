@@ -51,6 +51,22 @@ class FontToken(Token):
     embedded: bool = False
 
 
+class BulletToken(Token):
+    """Маркер, которым шаблон размечает перечни (T-69).
+
+    Рамка, которую создаёт вёрстка, своего оформления абзацев не имеет, и
+    список в ней выходил строками без маркера, хотя шаблон размечает списки
+    маркерами. `font` обязателен к переносу: «§» в Wingdings — квадрат, а без
+    гарнитуры это параграф. `color` пуст, когда маркер берёт цвет текста.
+    `indent` — висячий отступ под маркер в долях ширины холста.
+    """
+
+    char: str
+    font: str | None = None
+    color: str | None = Field(default=None, pattern=HEX_COLOR)
+    indent: float = Field(default=0.0, ge=0, le=0.5)
+
+
 class TypeScale(Contract):
     """Типографическая шкала шаблона.
 
@@ -70,3 +86,4 @@ class DesignTokens(Contract):
     fonts: list[FontToken] = Field(default_factory=list)
     colors: list[ColorToken] = Field(default_factory=list)
     type_scale: TypeScale = Field(default_factory=TypeScale)
+    bullet: BulletToken | None = None

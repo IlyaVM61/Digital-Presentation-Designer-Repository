@@ -16,12 +16,14 @@
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
+from statistics import median
 from pathlib import Path
 
 from pptx import Presentation
+from pptx.oxml.ns import qn
 
-from dpd.models.tokens import ColorToken, DesignTokens, FontToken, TypeScale
+from dpd.models.tokens import BulletToken, ColorToken, DesignTokens, FontToken, TypeScale
 from dpd.parsing.inheritance import StyleResolver, _master_style_name, _read_theme_fonts
 
 FREQUENCY = "shapes.frequency"
@@ -34,6 +36,12 @@ SATURATION_THRESHOLD = 30
 
 MAX_COLORS = 12
 MAX_FONTS = 8
+
+MASTER_BODY = "master.txStyles"
+"""Запасной источник маркера: стиль тела мастера — объявление, а не разметка."""
+
+DEFAULT_BULLET_INDENT = 0.02
+"""Висячий отступ под маркер в долях ширины, когда шаблон его не задал."""
 
 
 def extract_design_tokens(source) -> DesignTokens:
@@ -68,6 +76,73 @@ def extract_design_tokens(source) -> DesignTokens:
         fonts=_font_tokens(fonts, heading_fonts, theme_fonts),
         colors=_color_tokens(colors),
         type_scale=_type_scale(sizes),
+        bullet=_bullet_token(presentation),
+    )
+
+
+def _bullet_token(presentation) -> BulletToken | None:
+    """Маркер, которым шаблон размечает перечни (T-69).
+
+    Как и шрифт, берётся по частоте в разметке слайдов: мастер объявляет
+    маркер для плейсхолдеров тела, но надписи на слайдах шаблона размечены
+    своими, и побеждает то, чем шаблон действительно набран. Мастер — запасной
+    источник для шаблона без маркированных абзацев на слайдах. Шаблон, не
+    размечающий маркеров нигде, остаётся без маркера: навязывать его нельзя.
+    """
+    width = presentation.slide_width
+    counted: Counter[tuple[str, str | None, str | None]] = Counter()
+    indents: dict[tuple[str, str | None, str | None], list[float]] = defaultdict(list)
+    for slide in presentation.slides:
+        for shape in slide.shapes:
+            if not shape.has_text_frame:
+                continue
+            for paragraph in shape.text_frame.paragraphs:
+                marker = _marker(paragraph._p.pPr, width) if paragraph.text.strip() else None
+                if marker is not None:
+                    counted[marker[0]] += 1
+                    indents[marker[0]].append(marker[1])
+
+    source = FREQUENCY
+    if not counted:
+        styles = presentation.slide_master.element.find(qn("p:txStyles"))
+        body = styles.find(qn("p:bodyStyle")) if styles is not None else None
+        marker = _marker(body.find(qn("a:lvl1pPr")) if body is not None else None, width)
+        if marker is None:
+            return None
+        counted[marker[0]], indents[marker[0]], source = 1, [marker[1]], MASTER_BODY
+
+    (char, font, colour), occurrences = counted.most_common(1)[0]
+    measured = [value for value in indents[(char, font, colour)] if value > 0]
+    return BulletToken(
+        role="bullet",
+        sources=[source],
+        occurrences=occurrences,
+        confidence=round(occurrences / sum(counted.values()), 4),
+        char=char,
+        font=font,
+        color=colour,
+        indent=median(measured) if measured else DEFAULT_BULLET_INDENT,
+    )
+
+
+def _marker(properties, width: int) -> tuple[tuple[str, str | None, str | None], float] | None:
+    """Маркер абзаца: символ, гарнитура, цвет — и висячий отступ в долях ширины."""
+    if properties is None:
+        return None
+    char = properties.find(qn("a:buChar"))
+    if char is None or not char.get("char"):
+        return None
+    font = properties.find(qn("a:buFont"))
+    colour = properties.find(qn("a:buClr"))
+    rgb = colour.find(qn("a:srgbClr")) if colour is not None else None
+    indent = max(int(properties.get("marL", 0)), -int(properties.get("indent", 0)), 0)
+    return (
+        (
+            char.get("char"),
+            font.get("typeface") if font is not None else None,
+            f"#{rgb.get('val').upper()}" if rgb is not None else None,
+        ),
+        indent / width if width else 0.0,
     )
 
 

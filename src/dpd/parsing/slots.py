@@ -119,6 +119,10 @@ def obstacles(layout, canvas: Canvas) -> list[Bounds]:
     брался под все текстовые слайды колоды.
 
     Фон (почти весь холст) препятствием не считается: обходить его некуда.
+
+    Разделительная линия во всю ширину — препятствие при любой площади
+    (T-69): площадь у неё нулевая, а текст, перешедший через неё, ложится на
+    колонтитул.
     """
     shapes = list(_walk(layout.shapes))
     if _shows_master_shapes(layout):
@@ -131,7 +135,7 @@ def obstacles(layout, canvas: Canvas) -> list[Bounds]:
         if bounds is None:
             continue
         area = bounds.w * bounds.h
-        if MIN_OBSTACLE_AREA <= area <= MAX_SLOT_AREA:
+        if MIN_OBSTACLE_AREA <= area <= MAX_SLOT_AREA or (bounds.w > WIDE_OBSTACLE and area < MIN_OBSTACLE_AREA):
             found.append(bounds)
     return found
 
@@ -167,7 +171,7 @@ def derived_slot(
     if free is None:
         return None
 
-    top, bottom = free
+    top, bottom = _trim_edges(blocked, *free)
     left, right = _free_columns(blocked, top, bottom)
     if right - left < MIN_DERIVED_WIDTH:
         return None
@@ -185,6 +189,38 @@ def derived_slot(
         bounds=bounds,
         text_style=text_style,
     )
+
+
+def _trim_edges(blocked: list[Bounds], top: float, bottom: float) -> tuple[float, float]:
+    """Укоротить полосу из-за мелкого элемента у её края, если так дешевле (T-69).
+
+    Подпись колонтитула у нижнего края сужала место по всей высоте: на
+    корпоративном шаблоне текст начинался с пятой части ширины. Элемент в
+    нижней или верхней половине полосы отсекает край полосы, когда это
+    теряет меньше площади, чем сужение; высокая боковая иллюстрация
+    пересекает середину и, как прежде, сужает место.
+    """
+    width = 1 - 2 * DERIVED_MARGIN
+    moved = True
+    while moved:
+        moved = False
+        for bounds in blocked:
+            if bounds.y >= bottom or bounds.y + bounds.h <= top:
+                continue
+            middle = (top + bottom) / 2
+            narrowing = _narrowing(bounds) * (bottom - top)
+            if bounds.y >= middle and (bottom - bounds.y + GAP) * width < narrowing:
+                bottom, moved = bounds.y - GAP, True
+            elif bounds.y + bounds.h <= middle and (bounds.y + bounds.h + GAP - top) * width < narrowing:
+                top, moved = bounds.y + bounds.h + GAP, True
+    return top, bottom
+
+
+def _narrowing(bounds: Bounds) -> float:
+    """Сколько ширины отняло бы сужение места в обход элемента."""
+    from_left = bounds.x + bounds.w + GAP - DERIVED_MARGIN
+    from_right = 1 - DERIVED_MARGIN - (bounds.x - GAP)
+    return max(min(from_left, from_right), 0.0)
 
 
 def _free_columns(blocked: list[Bounds], top: float, bottom: float) -> tuple[float, float]:

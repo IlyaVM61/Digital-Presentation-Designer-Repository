@@ -15,6 +15,7 @@ from pydantic import Field
 from dpd.models.common import Bounds, Canvas, Contract, TextFrame, TextRun
 from dpd.models.structure import AxisTitles, ChartSeries
 from dpd.models.template import LayoutFamily
+from dpd.models.tokens import BulletToken
 
 ElementKind = Literal["text", "table", "chart"]
 
@@ -61,6 +62,10 @@ class RenderedElement(Contract):
 
     `frame` переходит от слота: проверка переполнения считает вместимость
     той же метрикой, что вёрстка, а слота у неё под рукой нет (T-60).
+
+    `bullet` и `anchor` — оформление рамки, которую создаёт вёрстка (T-69):
+    маркер шаблона у списка и положение текста по высоте. У родного
+    плейсхолдера их задаёт шаблон, и они остаются пустыми.
     """
 
     slot_id: str
@@ -70,6 +75,8 @@ class RenderedElement(Contract):
     table: RenderedTable | None = None
     chart: RenderedChart | None = None
     frame: TextFrame | None = None
+    bullet: BulletToken | None = None
+    anchor: Literal["top", "middle"] = "top"
 
 
 class LayoutDecision(Contract):
