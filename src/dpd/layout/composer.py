@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from dpd.layout.charts import build as build_chart
+from dpd.layout.filling import bullet_for, ceiling, grown, growable, spread, with_bullet
 from dpd.layout.overflow import plan_compensations
 from dpd.layout.selector import roomiest_slot, select, visual_slot
 from dpd.layout.styling import apply, style_for
@@ -30,6 +31,7 @@ from dpd.models import (
     Slot,
     StructureSlide,
     TemplateSchema,
+    TextFrame,
 )
 from dpd.models import (
     RenderedElement as _RE,
@@ -95,6 +97,10 @@ def _compose_slide(
         elements.append(element)
         compensations.extend(applied)
 
+    # Тело в своей рамке растёт, но остаётся заметно мельче заголовка (T-69).
+    title_size = elements[0].runs[0].size_pt if elements and elements[0].runs else None
+    limit = ceiling(title_size, scale)
+
     # Самое просторное место, а не первое: по нему выбор макета оценил
     # макет, и туда же должно лечь содержимое. Первым бывает полоска
     # надзаголовка — на VK Tech тело резалось в ней до 7 pt (T-60).
@@ -130,7 +136,14 @@ def _compose_slide(
         compensations.extend(applied)
         if table_slot.kind == "table" and body_slot is not None and slide.body and slide.body.items:
             placed, applied = _text_columns(
-                _columns(layout, body_slot), slide.body.items, tokens, template.canvas, scale, size_shift, decisions
+                _columns(layout, body_slot),
+                slide.body.items,
+                tokens,
+                template.canvas,
+                scale,
+                size_shift,
+                decisions,
+                limit,
             )
             elements.extend(placed)
             compensations.extend(applied)
@@ -146,7 +159,7 @@ def _compose_slide(
     if body_slot is not None and body_items:
         columns = _columns(layout, body_slot)
         placed, applied = _text_columns(
-            columns, body_items, tokens, template.canvas, scale, size_shift, decisions
+            columns, body_items, tokens, template.canvas, scale, size_shift, decisions, limit
         )
         elements.extend(placed)
         compensations.extend(applied)
@@ -218,7 +231,9 @@ def _split(items: list[str], parts: int) -> list[list[str]]:
     return chunks
 
 
-def _text_columns(columns: list[Slot], items: list[str], tokens, canvas, scale, size_shift=0, decisions=None):
+def _text_columns(
+    columns: list[Slot], items: list[str], tokens, canvas, scale, size_shift=0, decisions=None, limit=None
+):
     """Уложить тело в колонки ряда слева направо (T-60, T-64).
 
     Тело, занявшее одну колонку из нескольких, оставляло соседние пустыми, а
@@ -230,7 +245,7 @@ def _text_columns(columns: list[Slot], items: list[str], tokens, canvas, scale, 
     """
     chunks = _split(items, len(columns))
     planned = [
-        _text_element(column, chunk, tokens, canvas, scale, size_shift, decisions)
+        _text_element(column, chunk, tokens, canvas, scale, size_shift, decisions, limit, len(columns) == 1)
         for column, chunk in zip(columns, chunks)
     ]
     sizes = [element.runs[0].size_pt for element, _ in planned if element.runs and element.runs[0].size_pt]
@@ -260,7 +275,17 @@ def _text_columns(columns: list[Slot], items: list[str], tokens, canvas, scale, 
     return elements, compensations
 
 
-def _text_element(slot: Slot, paragraphs: list[str], tokens, canvas, scale, size_shift=0, decisions=None):
+def _text_element(
+    slot: Slot,
+    paragraphs: list[str],
+    tokens,
+    canvas,
+    scale,
+    size_shift=0,
+    decisions=None,
+    limit=None,
+    spread_out=False,
+):
     """Уложить текст в слот.
 
     Геометрия берётся из слота без изменений: вёрстка не выдумывает
@@ -270,15 +295,29 @@ def _text_element(slot: Slot, paragraphs: list[str], tokens, canvas, scale, size
     Один `TextRun` соответствует одному абзацу. Оформление задаётся явно и
     берётся из правил шаблона: стиль слота, разрешённый по цепочке
     наследования, с опорой на дизайн-токены там, где слот молчит.
+
+    В рамке, которую создаёт вёрстка, список получает маркер шаблона,
+    кегль, не заданный шаблоном, растёт до потолка `limit`, а одна колонка
+    с малым текстом разводится по высоте (`spread_out`, T-69).
     """
     style = style_for(slot, tokens, size_shift, decisions)
-    styled = slot.model_copy(update={"text_style": style})
+    bullet = bullet_for(slot, paragraphs, tokens.bullet if tokens else None)
+    frame = with_bullet(slot.frame, bullet) if bullet else slot.frame
+    if growable(slot) and style.size_pt:
+        size = grown(paragraphs, slot.bounds, canvas, frame or TextFrame(), style.size_pt, scale, limit)
+        style = style.model_copy(update={"size_pt": size})
+    styled = slot.model_copy(update={"text_style": style, "frame": frame})
     compensations, runs = plan_compensations(
         paragraphs, styled, canvas, scale or [style.size_pt]
     )
     if not runs:
         runs = [apply(style, paragraph) for paragraph in paragraphs]
+    anchor = "top"
+    if spread_out and growable(slot) and not compensations and runs and runs[0].size_pt:
+        frame, anchor = spread([run.text for run in runs], slot.bounds, canvas, frame or TextFrame(), runs[0].size_pt)
     return (
-        RenderedElement(slot_id=slot.id, kind="text", bounds=slot.bounds, runs=runs, frame=slot.frame),
+        RenderedElement(
+            slot_id=slot.id, kind="text", bounds=slot.bounds, runs=runs, frame=frame, bullet=bullet, anchor=anchor
+        ),
         compensations,
     )
