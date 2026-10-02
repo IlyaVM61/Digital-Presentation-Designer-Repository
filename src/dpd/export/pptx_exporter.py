@@ -22,10 +22,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from lxml import etree
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
 from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
+from pptx.enum.text import MSO_ANCHOR
+from pptx.oxml.ns import qn
 from pptx.util import Emu, Pt
 
 from dpd.models import (
@@ -117,6 +120,7 @@ def _fill_slide(pptx_slide, elements: list[RenderedElement], slots: dict[str, Sl
         else:
             textbox = _new_textbox(pptx_slide, element, canvas)
             _write_runs(textbox.text_frame, element.runs, slot.text_style if slot else None)
+            _shape_paragraphs(textbox.text_frame, element, canvas)
 
     _remove_empty_placeholders(pptx_slide, used)
 
@@ -322,6 +326,36 @@ def _write_runs(text_frame, runs: list[TextRun], slot_style=None) -> None:
         if slot_style is not None:
             _apply_slot_style(written, slot_style)
         _apply_style(written, run)
+
+
+def _shape_paragraphs(text_frame, element: RenderedElement, canvas: Canvas) -> None:
+    """Оформление абзацев рамки, которую создаёт вёрстка (T-69).
+
+    Маркер шаблона с висячим отступом, отбивка и положение по высоте — то,
+    что у родного плейсхолдера задаёт шаблон. Порядок дочерних элементов
+    `a:pPr` задан схемой: отбивка, цвет, гарнитура и символ маркера.
+    """
+    spacing = element.frame.space_before_pt if element.frame else 0.0
+    bullet = element.bullet
+    for paragraph in text_frame.paragraphs:
+        if not spacing and bullet is None:
+            break
+        properties = paragraph._p.get_or_add_pPr()
+        if spacing:
+            before = etree.SubElement(properties, qn("a:spcBef"))
+            etree.SubElement(before, qn("a:spcPts"), val=str(round(spacing * 100)))
+        if bullet is not None:
+            indent = round(bullet.indent * canvas.width_emu)
+            properties.set("marL", str(indent))
+            properties.set("indent", str(-indent))
+            if bullet.color:
+                colour = etree.SubElement(properties, qn("a:buClr"))
+                etree.SubElement(colour, qn("a:srgbClr"), val=bullet.color.lstrip("#"))
+            if bullet.font:
+                etree.SubElement(properties, qn("a:buFont"), typeface=bullet.font)
+            etree.SubElement(properties, qn("a:buChar"), char=bullet.char)
+    if element.anchor == "middle":
+        text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
 
 
 def _apply_slot_style(written_run, style) -> None:
