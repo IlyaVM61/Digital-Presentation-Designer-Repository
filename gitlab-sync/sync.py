@@ -183,6 +183,11 @@ def main() -> int:
     if not args.target:
         parser.error("нужен --target или переменная DPD_GITLAB_DIR")
 
+    # Вывод в канал Windows кодирует в cp1251 — как в dpd.batch.
+    for stream in (sys.stdout, sys.stderr):
+        if not stream.isatty():
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     source = Path(__file__).resolve().parents[1]
     try:
         result = sync(source, Path(args.target), args.branch, ref=args.ref, base=args.base, push=args.push)
