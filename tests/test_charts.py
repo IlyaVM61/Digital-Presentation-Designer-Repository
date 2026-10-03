@@ -147,6 +147,29 @@ def test_exported_chart_has_axis_titles(template_path: Path, out_dir: Path) -> N
     assert chart.value_axis.axis_title.text_frame.text == "пар"
 
 
+@pytest.mark.parametrize("chart_type", ["column", "line", "pie"])
+def test_exported_chart_title_is_explicitly_off(
+    chart_type: str, template_path: Path, out_dir: Path
+) -> None:
+    """T-75: у диаграммы с одним рядом заголовок не должен зависеть от программы.
+
+    Без явного запрета LibreOffice и PowerPoint подставляют заголовком имя ряда,
+    а OnlyOffice и Р7-Офис — нет: заказчик видел бы другую диаграмму, чем мы.
+    Заголовка в замысле вёрстки нет — его роль играет заголовок слайда.
+    """
+    schema = parse_template(template_path)
+    exported = export_pptx(
+        compose(deck(chart_type), schema), schema, template_path, out_dir / f"title-{chart_type}.pptx"
+    )
+    chart = next(
+        shape for shape in Presentation(str(exported)).slides[0].shapes if shape.has_chart
+    ).chart
+    ns = {"c": "http://schemas.openxmlformats.org/drawingml/2006/chart"}
+    deleted = chart._chartSpace.chart.find("c:autoTitleDeleted", ns)
+    assert deleted is not None and deleted.get("val") in ("1", "true")
+    assert chart.has_title is False
+
+
 @pytest.mark.parametrize("chart_type", ["column", "bar", "line", "pie"])
 def test_supported_types_render(chart_type: str, template_path: Path, out_dir: Path) -> None:
     schema = parse_template(template_path)

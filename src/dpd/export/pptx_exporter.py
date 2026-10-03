@@ -170,6 +170,10 @@ def _write_chart(pptx_slide, element, canvas: Canvas) -> None:
     )
     chart = frame.chart
 
+    # Заголовок диаграммы явно выключен: без запрета LibreOffice и PowerPoint
+    # подставляют имя единственного ряда, а OnlyOffice и Р7-Офис — нет (T-75).
+    # Роль заголовка играет заголовок слайда.
+    chart.has_title = False
     chart.has_legend = spec.has_legend
     if spec.has_legend:
         chart.legend.position = XL_LEGEND_POSITION.BOTTOM
