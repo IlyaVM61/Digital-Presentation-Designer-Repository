@@ -41,6 +41,10 @@ apt-get install -y -q --no-install-recommends \
 echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" \
     | debconf-set-selections
 apt-get install -y -q ttf-mscorefonts-installer || echo "!! шрифты Microsoft не скачались, остаются Liberation"
+# Tahoma (её много в корпоративных шаблонах) есть только у Wine, и лежит она
+# вне путей fontconfig — без ссылки LibreOffice подменяет её Noto Sans.
+mkdir -p /usr/local/share/fonts
+ln -sfn /usr/share/wine/fonts /usr/local/share/fonts/wine
 fc-cache -f >/dev/null
 
 echo "== Caddy"
