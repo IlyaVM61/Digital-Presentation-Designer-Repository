@@ -99,6 +99,17 @@ def test_page_offers_upload_and_plan(app: AppTest) -> None:
     assert app.text_area, "нет поля плана колоды"
 
 
+def test_page_says_truly_where_files_go(app: AppTest) -> None:
+    """T-74: страница работает и на сервере для экспертов, а там «файл не
+    покидает этот компьютер» — неправда: шаблон загружается на сервер. Правда
+    в обоих случаях одна — что уходит модели, а что нет."""
+    app.run()
+
+    text = " ".join(caption.value for caption in app.caption)
+    assert "не покидает этот компьютер" not in text
+    assert "модел" in text, "страница не говорит, что уходит модели"
+
+
 def test_build_button_without_a_template_does_not_crash(app: AppTest) -> None:
     """Кнопка без шаблона объясняет, чего не хватает, а не падает."""
     app.run()
