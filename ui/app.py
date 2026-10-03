@@ -65,6 +65,7 @@ from dpd.orchestrator import (
     keep_template,
     look,
     revise,
+    run_directory,
     run_pipeline,
 )
 from dpd.render import soffice_path
@@ -511,7 +512,7 @@ if st.button("Собрать презентацию", type="primary"):
             result = run_pipeline(
                 report["path"],
                 structure,
-                output_dir() / time.strftime("%Y%m%d-%H%M%S"),
+                run_directory(output_dir()),
                 formats=tuple(chosen_formats),
                 previews=previews,
                 progress=show,
