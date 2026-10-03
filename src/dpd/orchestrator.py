@@ -225,6 +225,16 @@ def keep_template(data: bytes, name: str, folder: str | Path) -> Path:
     return target
 
 
+def run_directory(base: str | Path) -> Path:
+    """Каталог одного прогона страницы: время запуска плюс случайный хвост (T-74).
+
+    Одной секунды мало: на сервере для экспертов два сеанса, нажавшие
+    «Собрать» одновременно, писали бы колоды, превью и профиль LibreOffice в
+    один каталог. Время впереди — прогоны по-прежнему сортируются по имени.
+    """
+    return Path(base) / f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+
+
 def draft(
     pack: ContentPack,
     client: ModelClient,
