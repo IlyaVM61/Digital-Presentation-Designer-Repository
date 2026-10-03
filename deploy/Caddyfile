@@ -1,0 +1,14 @@
+# Caddy перед страницей: сертификат HTTPS (Let's Encrypt, выпуск и продление
+# сам) и вход по логину и паролю для экспертов. Значения подставляет
+# setup-server.sh; заполненный файл живёт только на сервере.
+
+__DOMAIN__ {
+	encode zstd gzip
+
+	basic_auth {
+		__LOGIN__ __HASH__
+	}
+
+	# Streamlit держит страницу через WebSocket — Caddy проксирует его сам.
+	reverse_proxy 127.0.0.1:8501
+}

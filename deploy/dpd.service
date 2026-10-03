@@ -1,0 +1,27 @@
+[Unit]
+Description=Цифровой дизайнер презентаций — страница Streamlit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=dpd
+Group=dpd
+WorkingDirectory=/opt/dpd/app
+Environment=DPD_OUTPUT_DIR=/var/lib/dpd
+Environment=HOME=/var/lib/dpd
+Environment=LANG=C.UTF-8
+Environment=PYTHONIOENCODING=utf-8
+# Ключ модели и прокси — здесь; значения из файла сильнее строк выше.
+EnvironmentFile=/etc/dpd/dpd.env
+# Страница слушает только локальный адрес: снаружи к ней ведёт Caddy с HTTPS и паролем.
+ExecStart=/opt/dpd/venv/bin/streamlit run ui/app.py \
+    --server.address=127.0.0.1 \
+    --server.port=8501 \
+    --server.headless=true \
+    --server.fileWatcherType=none \
+    --browser.gatherUsageStats=false
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
