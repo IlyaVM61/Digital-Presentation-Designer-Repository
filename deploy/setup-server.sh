@@ -28,7 +28,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "== Пакеты"
 apt-get update -q
 apt-get install -y -q --no-install-recommends \
-    python3-venv python3-pip git curl ca-certificates gnupg \
+    python3-venv python3-pip git curl ca-certificates gnupg ufw \
     debian-keyring debian-archive-keyring apt-transport-https \
     libreoffice-impress libreoffice-core \
     fontconfig fonts-liberation fonts-liberation2 fonts-dejavu-core \
@@ -101,7 +101,8 @@ CRED_FILE="$CONF_DIR/credentials"
 if [ -z "${DPD_PASSWORD:-}" ] && [ -f "$CRED_FILE" ]; then
     DPD_PASSWORD="$(sed -n 's/^password=//p' "$CRED_FILE")"
 fi
-DPD_PASSWORD="${DPD_PASSWORD:-$(tr -dc 'a-km-np-z2-9' </dev/urandom | head -c 12)}"
+# Не `tr </dev/urandom | head`: под pipefail SIGPIPE у tr роняет скрипт.
+DPD_PASSWORD="${DPD_PASSWORD:-$(python3 -c 'import secrets; print("".join(secrets.choice("abcdefghkmnpqrstuvwxyz23456789") for _ in range(12)))')}"
 umask 077
 printf 'url=https://%s\nlogin=%s\npassword=%s\n' "$DPD_DOMAIN" "$DPD_LOGIN" "$DPD_PASSWORD" > "$CRED_FILE"
 umask 022
