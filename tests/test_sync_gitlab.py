@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -216,3 +217,86 @@ def test_overlay_turns_gitdoc_off_and_ignores_secrets() -> None:
     ignored = (SYNC / "overlay/.gitignore").read_text(encoding="utf-8").splitlines()
     for rule in (".env", "assets/templates/corporate/*", "!assets/templates/corporate/README.md"):
         assert rule in ignored, rule
+
+
+# --- README второго трека (T-78) ---------------------------------------------
+#
+# У репозитория GitLab свой README: он лежит в overlay и встаёт в корень
+# поверх того, что создал GitLab. Читают его эксперты второго трека, поэтому
+# он не ссылается ни на рабочие документы `docs/`, ни на публичный
+# репозиторий, а адрес сервиса и пароль живут только на сервере и на
+# платформе сдачи. Примеры — папка `examples/` только репозитория GitLab: она
+# кладётся отдельным коммитом из локальных материалов второго трека, мимо
+# публичного репозитория, и синхронизация её не трогает.
+
+README = SYNC / "overlay/README.md"
+EXAMPLES_SOURCE = ROOT / "assets/templates/corporate/examples"
+
+# Путь в обратных кавычках: каталог проекта или файл в корне.
+REPO_PATH = re.compile(
+    r"`((?:src|ui|tests|prompts|configs|scripts|deploy|assets|docs|examples)/[^`\s]*"
+    r"|[A-Z][A-Z_]*\.md|pyproject\.toml|\.env\.example)`"
+)
+# Внешние адреса, которые README вправе называть: провайдер по умолчанию и
+# программы для установки.
+PUBLIC_HOSTS = {"openrouter.ai", "www.libreoffice.org", "www.python.org"}
+
+
+def track_two_readme() -> str:
+    return README.read_text(encoding="utf-8")
+
+
+def test_overlay_readme_replaces_the_one_gitlab_created(repos: tuple[Path, Path, Path]) -> None:
+    source, remote, target = repos
+    write(source, "gitlab-sync/overlay/README.md", "# Второй трек\n")
+    git(source, "add", "-A")
+    git(source, "commit", "-q", "-m", "README второго трека")
+
+    sync.sync(source, target, "feature/sync-1", push=True)
+
+    assert git(remote, "show", "feature/sync-1:README.md") == "# Второй трек\n"
+
+
+def test_track_two_readme_covers_the_task() -> None:
+    text = track_two_readme()
+    for heading in ("Сервис по ссылке", "Запуск", "Примеры", "Подготовка шаблона", "Замена модели", "Ограничения"):
+        assert re.search(rf"^##+ .*{heading}", text, re.MULTILINE), heading
+
+
+def test_track_two_readme_names_the_layout_prefixes_the_parser_knows() -> None:
+    from dpd.parsing.families import NAME_PREFIXES
+
+    text = track_two_readme()
+    for prefix, _ in NAME_PREFIXES:
+        assert f"`{prefix}" in text, prefix
+
+
+def test_model_is_replaced_by_the_variables_the_readme_names(tmp_path: Path) -> None:
+    from dpd.llm.settings import load_settings
+
+    text = track_two_readme()
+    for name in ("LLM_BASE_URL", "LLM_MODEL", "LLM_API_KEY", "VLM_BASE_URL", "VLM_MODEL"):
+        assert f"`{name}" in text, name
+
+    environ = {"LLM_BASE_URL": "https://models.example/v1", "LLM_MODEL": "другая/модель", "LLM_API_KEY": "k"}
+    settings = load_settings("llm", environ=environ, env_file=tmp_path / "нет.env")
+    assert (settings.base_url, settings.model, settings.api_key) == ("https://models.example/v1", "другая/модель", "k")
+
+
+def test_track_two_readme_points_only_to_files_that_reach_gitlab() -> None:
+    files = set(project_selection()) | {
+        path.relative_to(SYNC / "overlay").as_posix() for path in (SYNC / "overlay").rglob("*") if path.is_file()
+    }
+    for path in REPO_PATH.findall(track_two_readme()):
+        if path.startswith("examples/"):
+            if EXAMPLES_SOURCE.is_dir():  # материалы второго трека есть только на машине владельца
+                assert (EXAMPLES_SOURCE / path.removeprefix("examples/")).exists(), path
+            continue
+        assert any(file == path or file.startswith(path.rstrip("/") + "/") for file in files), path
+
+
+def test_track_two_readme_holds_no_server_address() -> None:
+    text = track_two_readme()
+    hosts = set(re.findall(r"https?://([^/\s)`>]+)", text))
+    assert hosts <= PUBLIC_HOSTS, hosts - PUBLIC_HOSTS
+    assert "sslip.io" not in text
